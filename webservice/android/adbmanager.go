@@ -321,6 +321,30 @@ func (m *Manager) poll() {
 		}
 		seen[primary.Serial] = true
 		m.updateDevice(primary, fallback)
+
+		// 归并残留：同一台硬件的其它 adb 条目（例如先手动添加的无线地址）
+		// 合并进主条目，否则界面上会出现两台"同一台手机"。
+		dev := m.devices[primary.Serial]
+		for i := range group {
+			if group[i].Serial == primary.Serial {
+				continue
+			}
+			old, ok := m.devices[group[i].Serial]
+			if !ok {
+				continue
+			}
+			if dev != nil {
+				if dev.Name == "" && old.Name != "" {
+					dev.Name = old.Name
+				}
+				if dev.WiFiAddr == "" && old.WiFiAddr != "" {
+					dev.WiFiAddr = old.WiFiAddr
+				}
+			}
+			delete(m.devices, group[i].Serial)
+			delete(m.lastResult, group[i].Serial)
+			m.save()
+		}
 	}
 
 	// 注册表里已有、但这次没出现的设备 -> OFFLINE / DISCONNECTED
@@ -363,6 +387,9 @@ func (m *Manager) updateDevice(d ADBDevice, fallback *ADBDevice) {
 	dev.Transport = d.Transport
 	dev.RawState = d.State
 	dev.Address = d.Address
+	if hw := m.hardwareID(d.Serial); hw != "" {
+		dev.HardwareID = hw
+	}
 	if d.Transport == TransportWiFi && d.Address != "" {
 		dev.WiFiAddr = d.Address
 	}
@@ -514,7 +541,8 @@ func (m *Manager) AddWiFi(address string) error {
 	dev.WiFiAddr = address
 	m.save()
 	m.addEventLocked("info", fmt.Sprintf("无线设备已连接：%s", address))
-	m.poll()
+	// 注意：poll() 自己会加锁，必须在释放锁之后调用，否则死锁（请求挂住并且轮询线程也停摆）
+	go m.poll()
 	return nil
 }
 
