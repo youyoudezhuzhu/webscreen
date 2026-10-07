@@ -10,3 +10,14 @@ test
 dist/
 
 .vscode/
+
+# android / gradle
+.gradle/
+build/
+app/build/
+app/src/main/jniLibs/
+local.properties
+*.apk
+*.iml
+.idea/
+.kotlin/

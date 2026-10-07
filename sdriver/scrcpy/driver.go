@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,12 @@ type ScrcpyDriver struct {
 	scid      string
 	// socketName string
 
+	// localMode is true when webscreen runs on the device itself (root, no adb)
+	localMode bool
+	// handle of the locally started scrcpy server
+	localServerCmd *exec.Cmd
+	localServerCtx context.Context
+
 	cacheMutex         sync.RWMutex
 	LastVPS            []byte
 	LastSPS            []byte
@@ -72,6 +79,7 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 		},
 	}
 	da.ctx, da.cancel = context.WithCancel(context.Background())
+	da.localMode = utils.IsLocalRootMode()
 	da.adbClient = NewADBClient(config["deviceID"], da.scid, da.ctx)
 
 	data, err := scrcpyServerData.ReadFile(SCRCPY_EMBED_PATH)
@@ -79,39 +87,69 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 		log.Printf("[scrcpy] read scrcpy-server failed: %v", err)
 		return nil, err
 	}
-	SCRCPY_SERVER_LOCAL_PATH := os.TempDir() + "/scrcpy-server"
-	err = os.WriteFile(SCRCPY_SERVER_LOCAL_PATH, data, 0755)
-	if err != nil {
-		log.Printf("[scrcpy] write scrcpy-server to local file failed: %v", err)
-		return nil, err
-	}
 
 	localPort := SCRCPY_PROXY_PORT_DEFAULT
+	scrcpyServerPath := SCRCPY_SERVER_ANDROID_DST
 
-	da.adbClient.ReverseRemove(fmt.Sprintf("localabstract:scrcpy_%s", da.scid))
-	err = da.adbClient.Reverse(fmt.Sprintf("localabstract:scrcpy_%s", da.scid), "tcp:"+localPort)
-	if err != nil {
-		log.Printf("[scrcpy] Set up reverse tunnel failed: %v", err)
-		// listener.Close()
-		return nil, err
+	if da.localMode {
+		// Running on the device itself: no adb, no reverse tunnel and no push.
+		// The scrcpy server is started locally and listens on an abstract
+		// socket that we connect to directly.
+		scrcpyServerPath, err = writeLocalScrcpyServer(data)
+		if err != nil {
+			log.Printf("[scrcpy] store scrcpy-server failed: %v", err)
+			return nil, err
+		}
+		log.Printf("[scrcpy] on-device mode (root, no adb), scrcpy-server stored at %s", scrcpyServerPath)
+	} else {
+		SCRCPY_SERVER_LOCAL_PATH := os.TempDir() + "/scrcpy-server"
+		err = os.WriteFile(SCRCPY_SERVER_LOCAL_PATH, data, 0755)
+		if err != nil {
+			log.Printf("[scrcpy] write scrcpy-server to local file failed: %v", err)
+			return nil, err
+		}
+
+		da.adbClient.ReverseRemove(fmt.Sprintf("localabstract:scrcpy_%s", da.scid))
+		err = da.adbClient.Reverse(fmt.Sprintf("localabstract:scrcpy_%s", da.scid), "tcp:"+localPort)
+		if err != nil {
+			log.Printf("[scrcpy] Set up reverse tunnel failed: %v", err)
+			// listener.Close()
+			return nil, err
+		}
+		log.Printf("[scrcpy] set up reverse tunnel success: localabstract:scrcpy_%s -> tcp:%s", da.scid, localPort)
+
+		err = da.adbClient.PushScrcpyServer(SCRCPY_SERVER_LOCAL_PATH, SCRCPY_SERVER_ANDROID_DST)
+		if err != nil {
+			log.Printf("[scrcpy] Push scrcpy-server failed: %v", err)
+			return nil, err
+		}
+		os.Remove(SCRCPY_SERVER_LOCAL_PATH)
 	}
-	log.Printf("[scrcpy] set up reverse tunnel success: localabstract:scrcpy_%s -> tcp:%s", da.scid, localPort)
 
-	if !da.adbClient.SupportOpusAudio() {
+	if !da.supportOpusAudio() {
 		config["audio"] = "false"
 		log.Println("[scrcpy] Device does not support Opus audio encoding, disabling audio.")
 		da.ControlChan <- sdriver.TextMsgEvent{Msg: "[scrcpy] Device does not support Opus audio encoding, disabling audio."}
 	}
-	err = da.adbClient.PushScrcpyServer(SCRCPY_SERVER_LOCAL_PATH, SCRCPY_SERVER_ANDROID_DST)
-	if err != nil {
-		log.Printf("[scrcpy] Push scrcpy-server failed: %v", err)
-		return nil, err
-	}
-	os.Remove(SCRCPY_SERVER_LOCAL_PATH)
-	listener, err := net.Listen("tcp", ":"+localPort)
-	if err != nil {
-		log.Printf("[scrcpy] Listen port failed: %v", err)
-		return nil, err
+
+	var listener net.Listener
+	if da.localMode {
+		// The scrcpy server accepts every stream socket before sending the
+		// device metadata, so tell the listener how many connections to open.
+		streams := 1 // video is always on for this driver
+		if config["audio"] == "true" {
+			streams++
+		}
+		if config["control"] == "true" {
+			streams++
+		}
+		listener = newAbstractListener(fmt.Sprintf("scrcpy_%s", da.scid), LOCAL_CONNECT_TIMEOUT, streams)
+	} else {
+		listener, err = net.Listen("tcp", ":"+localPort)
+		if err != nil {
+			log.Printf("[scrcpy] Listen port failed: %v", err)
+			return nil, err
+		}
 	}
 	// da.adbClient.cancel()
 	log.Printf("[scrcpy] driver config: %v", config)
@@ -260,7 +298,7 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 	}
 
 	options := map[string]string{
-		"CLASSPATH":           SCRCPY_SERVER_ANDROID_DST,
+		"CLASSPATH":           scrcpyServerPath,
 		"Version":             SCRCPY_VERSION,
 		"scid":                da.scid,
 		"max_size":            strconv.Itoa(max_size),
@@ -293,7 +331,24 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 		// log.Printf("start_app: %s", config["start_app"])
 	}
 
-	da.adbClient.StartScrcpyServer(options)
+	if da.localMode {
+		// With tunnel_forward the scrcpy server creates the listener itself
+		// (LocalServerSocket -> abstract socket) and accepts the three
+		// connections on it. The dummy byte must be turned off so the stream
+		// framing stays identical to the adb (reverse tunnel) mode.
+		options["tunnel_forward"] = "true"
+		options["send_dummy_byte"] = "false"
+	}
+
+	if da.localMode {
+		if err := da.startLocalScrcpyServer(options); err != nil {
+			log.Printf("[scrcpy] start local scrcpy server failed: %v", err)
+			listener.Close()
+			return nil, err
+		}
+	} else {
+		da.adbClient.StartScrcpyServer(options)
+	}
 	da.options = options
 	// log.Println("Scrcpy server started successfully")
 	// conns := make([]net.Conn, 3)
@@ -302,14 +357,16 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 	// 设置一个总的超时时间，如果在这个时间内没有建立所有连接，就认为失败
 	// scrcpy-server 启动失败通常会很快退出，或者根本连不上
 	timeout := time.Second * 5
-	listener.(*net.TCPListener).SetDeadline(time.Now().Add(timeout))
+	if tcpListener, ok := listener.(*net.TCPListener); ok {
+		tcpListener.SetDeadline(time.Now().Add(timeout))
+	}
 
 	if options["video"] == "true" {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Printf("[scrcpy] Accept failed (可能是 scrcpy-server 启动失败): %v", err)
 			listener.Close()
-			da.adbClient.ReverseRemove(fmt.Sprintf("localabstract:scrcpy_%s", da.scid))
+			da.cleanupTunnel()
 			return nil, fmt.Errorf("failed to accept connection from scrcpy-server: %v", err)
 		}
 		err = da.readDeviceMeta(conn)
@@ -326,7 +383,7 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 		if err != nil {
 			log.Printf("[scrcpy] Accept failed (可能是 scrcpy-server 启动失败): %v", err)
 			listener.Close()
-			da.adbClient.ReverseRemove(fmt.Sprintf("localabstract:scrcpy_%s", da.scid))
+			da.cleanupTunnel()
 			return nil, fmt.Errorf("failed to accept connection from scrcpy-server: %v", err)
 		}
 		da.assignConn(conn)
@@ -336,7 +393,7 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 		if err != nil {
 			log.Printf("[scrcpy] Accept failed (可能是 scrcpy-server 启动失败): %v", err)
 			listener.Close()
-			da.adbClient.ReverseRemove(fmt.Sprintf("localabstract:scrcpy_%s", da.scid))
+			da.cleanupTunnel()
 			return nil, fmt.Errorf("failed to accept connection from scrcpy-server: %v", err)
 		}
 		da.controlConn = conn
@@ -350,10 +407,14 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 
 	// 甜点值
 	if da.videoConn != nil {
-		da.videoConn.(*net.TCPConn).SetReadBuffer(4 * 1024 * 1024)
+		if tcpConn, ok := da.videoConn.(*net.TCPConn); ok {
+			tcpConn.SetReadBuffer(4 * 1024 * 1024)
+		}
 	}
 	if da.audioConn != nil {
-		da.audioConn.(*net.TCPConn).SetReadBuffer(64 * 1024)
+		if tcpConn, ok := da.audioConn.(*net.TCPConn); ok {
+			tcpConn.SetReadBuffer(64 * 1024)
+		}
 	}
 
 	// 设更合理的读缓冲区大小

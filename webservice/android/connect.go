@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"webscreen/sdriver/scrcpy"
 	"webscreen/utils"
 )
 
@@ -19,8 +20,20 @@ func ExecADB(args ...string) error {
 	return cmd.Run()
 }
 
-// GetDevices returns a list of connected devices
+// GetDevices returns a list of connected devices.
+// In on-device (root) mode the device itself is the only available device.
 func GetDevices() ([]AndroidDevice, error) {
+	if utils.IsLocalRootMode() {
+		return []AndroidDevice{
+			{
+				DeviceID: scrcpy.LocalDeviceName(),
+				IP:       "127.0.0.1",
+				Port:     0,
+				Status:   "connected",
+			},
+		}, nil
+	}
+
 	adbPath, err := utils.GetADBPath()
 	if err != nil {
 		return nil, err

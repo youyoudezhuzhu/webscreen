@@ -131,6 +131,29 @@ After you start streaming, you might need to manually make the scene a little ch
 - Crash: MediaCodec 0x80001001 Exception on custom Android devices due to hardcoded H.264 High Profile (profile=8) [#11](https://github.com/huonwe/webscreen/issues/11)
   - set **profile=1** to **video_codec_options**
 
+## Android APK (rooted device, no adb, no Termux)
+
+This fork can also be built as an Android APK that runs webscreen **on the phone
+itself**, so a rooted device can stream its own screen to a browser without adb,
+Termux or any PC side helper:
+
+```
+rooted Android phone → install WebScreen.apk → grant root → Start
+                     → webscreen listens on 0.0.0.0:8079
+PC browser → http://<phone-ip>:8079
+```
+
+How it works: with `-local-root`, webscreen stores the embedded scrcpy-server in
+`/data/local/tmp/webscreen/`, starts it locally with
+`app_process64 ... tunnel_forward=true send_dummy_byte=false`, and connects to the
+`scrcpy_<scid>` abstract socket itself. WebRTC, audio, input, clipboard, PIN auth
+and the web UI are untouched.
+
+Build it in the cloud: **Actions → Build APK → Run workflow**, then download
+`WebScreen-debug.apk` from the run's artifacts. See
+[doc/android-apk.md](doc/android-apk.md) for the full instructions, requirements
+(root, arm64, Android 8+) and known limitations.
+
 ## [For Developers](doc/dev)
 
 ## License

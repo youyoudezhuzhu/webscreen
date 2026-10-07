@@ -102,6 +102,10 @@ func (sd *ScrcpyDriver) Stop() {
 		sd.controlConn.Close()
 	}
 	// sd.adbClient.ReverseRemove(fmt.Sprintf("localabstract:scrcpy_%s", sd.scid))
-	sd.adbClient.Stop()
+	if sd.localMode {
+		sd.stopLocalServer()
+	} else {
+		sd.adbClient.Stop()
+	}
 	sd.cancel()
 }

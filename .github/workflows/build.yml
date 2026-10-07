@@ -1,0 +1,89 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Build WebScreen APK (arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      # Same build the project already does for Termux users: android/arm64,
+      # statically linked and runnable on the device.
+      - name: Build webscreen for android/arm64
+        env:
+          GOOS: android
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          make ci DIST_DIR=dist SUFFIX="-android-arm64"
+          ls -l dist/
+          file dist/webscreen-android-arm64
+
+      - name: Pack the binary into the app
+        run: |
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp dist/webscreen-android-arm64 app/src/main/jniLibs/arm64-v8a/libwebscreen.so
+          chmod 755 app/src/main/jniLibs/arm64-v8a/libwebscreen.so
+          ls -l app/src/main/jniLibs/arm64-v8a/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$(command -v sdkmanager || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")"
+          echo "using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+
+      # A fixed (test only) keystore so consecutive CI builds can update each
+      # other instead of requiring an uninstall first.
+      - name: Restore signing keystore
+        run: |
+          base64 -d ci/signing/webscreen.p12.b64 > "$RUNNER_TEMP/webscreen.p12"
+          keytool -list -keystore "$RUNNER_TEMP/webscreen.p12" -storetype PKCS12 -storepass webscreen > /dev/null
+
+      - name: Build APK
+        env:
+          WEBSREEN_KEYSTORE: ${{ runner.temp }}/webscreen.p12
+          WEBSREEN_KEYSTORE_PASSWORD: webscreen
+          WEBSREEN_KEY_ALIAS: webscreen
+          WEBSREEN_KEY_PASSWORD: webscreen
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk WebScreen-debug.apk
+          ls -l WebScreen-debug.apk
+          unzip -l WebScreen-debug.apk | grep -E "libwebscreen|classes.dex" || true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebScreen-debug
+          path: WebScreen-debug.apk
+          if-no-files-found: error
