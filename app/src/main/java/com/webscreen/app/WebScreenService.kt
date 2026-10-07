@@ -67,6 +67,26 @@ class WebScreenService : Service() {
         }
 
         val port = prefs.port
+
+        // 上一版可能残留一个 webscreen 进程（例如升级前启动的服务没有被停掉），它会占住
+        // 端口让新实例起不来。启动前先清一遍同名服务进程与 scrcpy server。
+        // 模式用 "-host" 限定：应用自身的 cmdline 里也含 "webscreen"（包名），
+        // 更宽的模式会把应用自己杀掉。
+        RootShell.run(
+            listOf(
+                "pkill", "-f", "[w]ebscreen -host", ";",
+                "pkill", "-f", "[c]om.genymobile.scrcpy.Server"
+            ),
+            timeoutSeconds = 20
+        )
+        val portState = RootShell.run(
+            listOf("sh", "-c", "\"ss -ltn 2>/dev/null | grep -q ':$port ' && echo busy || echo free\""),
+            timeoutSeconds = 15
+        )
+        if (portState.output.contains("busy")) {
+            ServerState.append("[app] 端口 $port 仍被占用，启动可能失败（请先停止其它 webscreen 实例）")
+        }
+
         val remote = RootShell.REMOTE_BINARY
         val args = StringBuilder()
         args.append("'").append(remote).append("'")

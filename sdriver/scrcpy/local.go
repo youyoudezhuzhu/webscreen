@@ -26,7 +26,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -45,42 +44,10 @@ const (
 	LOCAL_CONNECT_TIMEOUT = 15 * time.Second
 )
 
-// appendUniqueGroup appends g unless it is already present.
-func appendUniqueGroup(groups []uint32, g uint32) []uint32 {
-	for _, existing := range groups {
-		if existing == g {
-			return groups
-		}
-	}
-	return append(groups, g)
-}
-
-// localServerGroups returns the supplementary groups the locally started
-// scrcpy server must keep.
-//
-// scrcpy drops privileges to the shell uid as soon as it starts, but it keeps
-// this process' supplementary groups, and /dev/uhid is 0660 uhid:uhid. Without
-// the uhid group, virtual mouse/keyboard/gamepad input fails with
-//
-//	open failed: EACCES (Permission denied)   (UhidManager.open)
-//
-// and the controller thread then kills the whole scrcpy server, which freezes
-// the stream.
-func localServerGroups() []uint32 {
-	groups := []uint32{0}
-	if current, err := os.Getgroups(); err == nil {
-		for _, g := range current {
-			groups = appendUniqueGroup(groups, uint32(g))
-		}
-	}
-	gid := uint32(AID_UHID)
-	if fi, err := os.Stat(UHID_DEVICE); err == nil {
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Gid != 0 {
-			gid = st.Gid
-		}
-	}
-	return appendUniqueGroup(groups, gid)
-}
+// localServerGroups and the SysProcAttr used to keep the uhid group live in
+// platform specific files (local_groups_unix.go / local_groups_other.go):
+// syscall.Credential and os.Getgroups only exist on unix, and the on-device
+// transport is only meaningful on Linux/Android anyway.
 
 var (
 	localEncodersOnce sync.Once
@@ -228,13 +195,7 @@ func (da *ScrcpyDriver) startLocalScrcpyServer(options map[string]string) error 
 	if os.Geteuid() == 0 {
 		// Keep the uhid group (see localServerGroups) so that the virtual input
 		// devices can be created once scrcpy dropped to the shell uid.
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{
-				Uid:    0,
-				Gid:    0,
-				Groups: localServerGroups(),
-			},
-		}
+		cmd.SysProcAttr = localSysProcAttr(localServerGroups())
 	}
 
 	if err := cmd.Start(); err != nil {
