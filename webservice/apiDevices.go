@@ -4,6 +4,7 @@ import (
 	linuxDriver "webscreen/sdriver/linux"
 	"webscreen/sdriver/scrcpy"
 	sagent "webscreen/streamAgent"
+	"webscreen/utils"
 	"webscreen/webservice/android"
 	"webscreen/webservice/linux"
 
@@ -25,15 +26,22 @@ func (wm *WebMaster) handleListDevices(c *gin.Context) {
 			Status:   d.GetStatus(),
 		})
 	}
-	linuxDevices, err := linux.GetDevices()
-	for _, d := range linuxDevices {
-		devicesInfo = append(devicesInfo, DeviceInfo{
-			Type:     d.GetType(),
-			DeviceID: d.GetDeviceID(),
-			IP:       d.GetIP(),
-			Port:     d.GetPort(),
-			Status:   d.GetStatus(),
-		})
+	// 上游自带的「本机桌面」条目：NAS 上没有可镜像的桌面，默认隐藏
+	// （见 utils.HideLocalDesktop，fpk 启动脚本里用 webscreen_hide_local_desktop 控制）
+	if !utils.HideLocalDesktop() {
+		linuxDevices, linuxErr := linux.GetDevices()
+		if linuxErr != nil {
+			err = linuxErr
+		}
+		for _, d := range linuxDevices {
+			devicesInfo = append(devicesInfo, DeviceInfo{
+				Type:     d.GetType(),
+				DeviceID: d.GetDeviceID(),
+				IP:       d.GetIP(),
+				Port:     d.GetPort(),
+				Status:   d.GetStatus(),
+			})
+		}
 	}
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})

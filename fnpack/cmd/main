@@ -12,6 +12,10 @@ PORT="${webscreen_port:-8079}"
 # 设备注册表（自定义名称 / 无线地址）落在应用数据目录，升级不丢
 export webscreen_datadir="${TRIM_PKGVAR}"
 
+# NAS 上没有可镜像的桌面：隐藏上游自带的「本机 Linux 桌面」条目
+# （它在飞牛端必然不可用，只会让用户困惑；设为 0 可恢复）
+export webscreen_hide_local_desktop="${webscreen_hide_local_desktop:-1}"
+
 RUN_USER="${wizard_webscreen_run_user:-root}"
 [ "${RUN_USER}" = "package" ] && RUN_USER="webscreen"
 
