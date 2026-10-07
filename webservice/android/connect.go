@@ -38,7 +38,16 @@ func GetDevices() ([]AndroidDevice, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(adbPath, "devices")
+
+	// 设备管理器在跑时以它的结果为准：那里区分了 USB / Wi-Fi、带授权状态、
+	// 用户自定义名称与热插拔跟踪。首次轮询尚未完成时退回下面的直接解析。
+	if m := GetManager(); m != nil {
+		if legacy := m.legacyDevices(); len(legacy) > 0 {
+			return legacy, nil
+		}
+	}
+
+	cmd := exec.Command(adbPath, "devices", "-l")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -52,21 +61,36 @@ func GetDevices() ([]AndroidDevice, error) {
 		}
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
+			transport := TransportWiFi
+			for _, f := range parts[2:] {
+				if strings.HasPrefix(f, "usb:") {
+					transport = TransportUSB
+				}
+			}
+			if strings.Contains(parts[0], ":") {
+				transport = TransportWiFi
+			}
 			switch parts[1] {
 			case "device":
 				adbDevices = append(adbDevices, AndroidDevice{
-					DeviceID: parts[0],
-					Status:   "connected",
+					DeviceID:   parts[0],
+					Status:     "connected",
+					Connection: transport,
+					State:      StatusOnline,
 				})
 			case "offline":
 				adbDevices = append(adbDevices, AndroidDevice{
-					DeviceID: parts[0],
-					Status:   "offline",
+					DeviceID:   parts[0],
+					Status:     "offline",
+					Connection: transport,
+					State:      StatusOffline,
 				})
 			case "unauthorized":
 				adbDevices = append(adbDevices, AndroidDevice{
-					DeviceID: parts[0],
-					Status:   "unauthorized",
+					DeviceID:   parts[0],
+					Status:     "unauthorized",
+					Connection: transport,
+					State:      StatusUnauthorized,
 				})
 			}
 		}

@@ -9,9 +9,13 @@ VERSION="$(cat fnpack/app/.version)"
 PLATFORM_TOOLS_URL="https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 BIN_DIR="fnpack/app/bin"
 
-echo "== [1/5] 编译 webscreen (linux/amd64) =="
+echo "== [1/5] 编译 webscreen (linux/amd64，含内嵌 recorder) =="
 mkdir -p "${BIN_DIR}"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/webscreen" .
+# 必须走项目自带 Makefile：sdriver/linux/driver.go 用 //go:embed bin/recorder 内嵌
+# sdriver/linux/bin/recorder，而该二进制被 .gitignore 忽略、只在构建时生成。
+# 直接 go build 在干净检出里必然失败（pattern bin/recorder: no matching files found）。
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 make ci DIST_DIR=dist SUFFIX=-linux-amd64
+cp -f dist/webscreen-linux-amd64 "${BIN_DIR}/webscreen"
 file "${BIN_DIR}/webscreen"
 
 echo "== [2/5] 准备 adb（Android platform-tools）=="
