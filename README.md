@@ -154,6 +154,17 @@ Build it in the cloud: **Actions → Build APK → Run workflow**, then download
 [doc/android-apk.md](doc/android-apk.md) for the full instructions, requirements
 (root, arm64, Android 8+) and known limitations.
 
+## fnOS (飞牛 OS) native package
+
+WebScreen 也能作为飞牛 OS 原生 `.fpk` 运行：**NAS 本身就是 WebScreen 服务端**，通过
+**USB 有线 ADB** 或 **Wi-Fi ADB** 管理多台 Android 设备 —— 不需要 PC、不需要 Termux、
+不需要手敲 adb 命令。设备列表区分 USB 与无线、显示授权状态（手机等待「允许 USB 调试」
+时会明确提示）、记住用户自定义设备名、支持 USB 热插拔与多设备并存。
+
+- 安装 / 升级 / 端口 / USB 权限处理 / 已知限制：见 [`doc/fnos-fpk.md`](doc/fnos-fpk.md)
+- 云编译：GitHub Actions → **Build fnOS FPK** → artifact `WebScreen-fpk`
+- 桌面入口「WebScreen 控制台」→ `http://<NAS>:8079/console`
+
 ## [For Developers](doc/dev)
 
 ## License
