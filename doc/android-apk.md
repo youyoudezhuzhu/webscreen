@@ -76,9 +76,11 @@ cp dist/webscreen-android-arm64 app/src/main/jniLibs/arm64-v8a/libwebscreen.so
 ## 安装 / 使用
 
 1. 安装 `WebScreen-debug.apk`（arm64 设备）。
-2. 打开 App，第一次会请求 Root 授权：**允许**。
-   App 用 `su -c id` 检测，只有拿到 `uid=0(root)` 才允许启动；
-   没有 Root 时界面会明确显示「需要 Root 权限才能运行 WebScreen」。
+2. 打开 App，第一次会请求 Root 授权：**在 Magisk / KernelSU / APatch 的弹窗里点「允许」**。
+   App 用 `su -c id` 检测，只有拿到 `uid=0(root)` 才会启用「启动 WebScreen」；
+   没有 Root（或还没批准）时界面会明确显示「需要 Root 权限才能运行 WebScreen」。
+   注意：部分 root 管理器把新应用默认设为「静默拒绝」，此时不会弹窗，
+   需要在管理器里手动找到 WebScreen 并允许（允许后 App 会自动检测到，无需重启）。
 3. 可选：填 6 位 PIN（对应原项目的 PIN 认证）、打开「开机自动启动」。
 4. 点「启动 WebScreen」。看到 `● Running` 后，界面会显示
    `http://手机IP:8079`，点「复制地址」可直接复制。
@@ -94,16 +96,22 @@ APK 默认使用 **8079**（原程序命令行默认是 8081，APK 启动时显�
 
 ## 已验证 / 未验证
 
-已验证（真机 OnePlus 7 Pro，Android 16，KernelSU root，arm64）：
+已在真机验证（OnePlus 7 Pro，Android 16，KernelSU-Next root，arm64）：
 
-- `-local-root` 模式下 app_process 拉起 scrcpy-server 成功；
-- abstract socket 连接、设备名与编解码元数据解析、H.264 视频帧持续输出
-  （886x1920，控制/UHID/剪贴板能力均为 true）；
-- 本机设备出现在 `/api/device/list`，配置接口正常。
+- 云端 Actions 构建 APK 成功，产物 `WebScreen-debug.apk`（arm64，含 `lib/arm64-v8a/libwebscreen.so`）；
+- APK 可安装、可启动，控制页正常显示 Root 状态 / 端口 / 访问地址 / PIN / 开机自启 / 运行日志；
+- `-local-root` 模式下 app_process 成功拉起 scrcpy-server；
+- **端到端投屏打通**：手机以 root 运行 webscreen 后，PC 浏览器访问
+  `http://手机IP:8079` → 选「本机」设备 → 实时看到手机屏幕（1440×3120 的 H.264，
+  `readyState=4` 且帧数持续增长），右侧控制按钮（音量/电源/返回/主页/多任务）齐全；
+- 设备列表显示真实机型名（本地 getprop）；编码器下拉来自本机 `media_codecs*.xml`
+  （c2.qti.avc.encoder 等），不再依赖 adb。
 
-未验证：
+未验证 / 已知限制：
 
-- 浏览器端 WebRTC 完整链路（音频/鼠标/键盘/触摸/剪贴板）尚未在本机模式下逐项实测；
+- 浏览器端 Audio / 鼠标 / 键盘 / 触摸 / 剪贴板 未逐项实测（视频通路已通）；
+- 「App 内点启动 → 服务跑起来」这一步在**本机 KernelSU 默认静默拒绝新应用**的策略下
+  需要先在管理器里允许本应用（App 侧代码路径与真机 su 调用均已确认可达内核钩子）；
 - 仅 arm64-v8a；未做 armeabi-v7a / x86_64；
 - 未 Root 设备不支持（也不打算支持）。
 

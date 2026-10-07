@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var autoStartSwitch: Switch
 
     private var rootGranted = false
+    private var rootCheckInFlight = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,8 +90,10 @@ class MainActivity : Activity() {
 
     private fun onStartClicked() {
         if (!rootGranted) {
+            // The root request is the standard `su` call; the manager shows the
+            // dialog the first time. Re-check and try again right away.
             toast(getString(R.string.need_root))
-            checkRoot()
+            checkRoot(andThenStart = true)
             return
         }
         val pin = pinInput.text.toString().trim()
@@ -119,12 +122,32 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ status
 
-    private fun checkRoot() {
+    private fun checkRoot(andThenStart: Boolean = false) {
+        if (rootCheckInFlight) return
+        rootCheckInFlight = true
         Thread {
             val granted = RootShell.hasRoot()
             rootGranted = granted
-            handler.post { renderRoot(granted) }
+            rootCheckInFlight = false
+            handler.post {
+                renderRoot(granted)
+                if (granted && andThenStart) {
+                    startServerNow()
+                }
+            }
         }.start()
+    }
+
+    private fun startServerNow() {
+        val pin = pinInput.text.toString().trim()
+        if (pin.isNotEmpty() && (pin.length != 6 || !pin.all { it.isDigit() })) {
+            toast(getString(R.string.invalid_pin))
+            return
+        }
+        prefs.pin = pin
+        ServerState.clearLog()
+        WebScreenService.start(this)
+        handler.postDelayed({ refreshFromProcess() }, 800)
     }
 
     private fun refreshFromProcess() {
@@ -145,6 +168,11 @@ class MainActivity : Activity() {
         override fun run() {
             renderServer()
             renderLog()
+            // While root is missing, keep probing: as soon as the user approves
+            // the request in Magisk/KernelSU the start button becomes usable.
+            if (!rootGranted) {
+                checkRoot()
+            }
             handler.postDelayed(this, 1000)
         }
     }
