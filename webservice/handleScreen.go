@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
+
+	"webscreen/webservice/android"
 )
 
 // sdpOffersH265 reports whether the browser's SDP offer contains H.265/HEVC.
@@ -127,6 +129,9 @@ Loop:
 	if codecFallback {
 		agent.Notify("This browser does not support H.265 (HEVC); streaming with H.264 instead. (H.265 needs a browser that offers HEVC, e.g. Safari.)")
 	}
+	// 记录投屏状态，供设备管理界面显示
+	android.GetManager().MarkStreaming(config.DeviceID, true)
+	defer android.GetManager().MarkStreaming(config.DeviceID, false)
 	capabilities := agent.Capabilities()
 	log.Printf("Driver Capabilities: %+v", capabilities)
 	media_meta := agent.GetMediaMeta()

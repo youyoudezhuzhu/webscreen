@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"webscreen/utils"
+	"webscreen/webservice/android"
 )
 
 type WebMasterConfig struct {
@@ -92,6 +95,15 @@ func (wm *WebMaster) setRouter() {
 
 		// api.POST("/device/discovery", wm.handleListDevicesDiscoveried)
 		// api.POST("/setPIN", wm.handleSetPIN)
+
+		// 统一设备管理（USB / Wi-Fi）：设备列表、事件日志、命名与连接控制
+		api.GET("/adb/devices", wm.handleADBDevices)
+		api.GET("/adb/events", wm.handleADBEvents)
+		api.POST("/adb/device/name", wm.handleADBSetName)
+		api.POST("/adb/device/wifi", wm.handleADBAddWiFi)
+		api.POST("/adb/device/remove", wm.handleADBRemove)
+		api.POST("/adb/device/disconnect", wm.handleADBDisconnect)
+		api.POST("/adb/device/reconnect", wm.handleADBReconnect)
 	}
 
 	wm.router = r
@@ -108,6 +120,11 @@ func (wm *WebMaster) Serve(host, port string) {
 	// if wm.config.EnableAndroidDiscover {
 	// 	go wm.AndroidDevicesDiscovery()
 	// }
+	// 统一设备管理器：USB 热插拔、RSA 授权状态与无线重连都由它跟踪。
+	// 本机 root 模式下没有 adb，不需要它。
+	if !utils.IsLocalRootMode() {
+		android.GetManager().Start()
+	}
 	wm.setRouter()
 	err := wm.router.Run(host + ":" + port)
 	if err != nil {

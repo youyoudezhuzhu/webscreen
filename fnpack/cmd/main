@@ -9,6 +9,9 @@ ADB_FLAG="${TRIM_PKGVAR}/adb-started-by-app"
 BIN_DIR="${TRIM_APPDEST}/bin"
 PORT="${webscreen_port:-8079}"
 
+# 设备注册表（自定义名称 / 无线地址）落在应用数据目录，升级不丢
+export webscreen_datadir="${TRIM_PKGVAR}"
+
 RUN_USER="${wizard_webscreen_run_user:-root}"
 [ "${RUN_USER}" = "package" ] && RUN_USER="webscreen"
 

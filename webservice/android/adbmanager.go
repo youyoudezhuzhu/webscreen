@@ -32,9 +32,8 @@ const (
 )
 
 const (
-	pollInterval   = 2 * time.Second
-	maxEvents      = 500
-	autoNamePrefix = ""
+	pollInterval = 2 * time.Second
+	maxEvents    = 500
 )
 
 // ADBDevice 是一条 `adb devices -l` 记录解析后的结果。
@@ -50,17 +49,17 @@ type ADBDevice struct {
 
 // ManagedDevice 是注册表里的一台设备，携带用户自定义名称与持久化字段。
 type ManagedDevice struct {
-	Serial    string `json:"serial"`      // 当前使用的 adb serial（USB 优先）
+	Serial     string `json:"serial"`      // 当前使用的 adb serial（USB 优先）
 	HardwareID string `json:"hardware_id"` // 硬件序列号，用于把 USB 与 Wi-Fi 归并为同一台设备
-	Name      string `json:"name"`        // 用户自定义名称
-	AutoName  string `json:"auto_name"`   // 自动推导名称（厂商 + 型号）
-	Transport string `json:"transport"`
-	Address   string `json:"address"`     // Wi-Fi 地址 ip:port
-	WiFiAddr  string `json:"wifi_addr"`   // 备用的无线地址，USB 断开时用于恢复
-	Status    string `json:"status"`
-	RawState  string `json:"raw_state"`
-	Streaming bool   `json:"streaming"`
-	LastSeen  string `json:"last_seen"`
+	Name       string `json:"name"`        // 用户自定义名称
+	AutoName   string `json:"auto_name"`   // 自动推导名称（厂商 + 型号）
+	Transport  string `json:"transport"`
+	Address    string `json:"address"`   // Wi-Fi 地址 ip:port
+	WiFiAddr   string `json:"wifi_addr"` // 备用的无线地址，USB 断开时用于恢复
+	Status     string `json:"status"`
+	RawState   string `json:"raw_state"`
+	Streaming  bool   `json:"streaming"`
+	LastSeen   string `json:"last_seen"`
 }
 
 // DisplayName 返回界面应显示的名称。
@@ -93,9 +92,9 @@ type persistedDevice struct {
 
 // Manager 统一管理 USB 与 Wi-Fi 两种接入方式的 Android 设备。
 type Manager struct {
-	mu      sync.RWMutex
-	devices map[string]*ManagedDevice // key: 当前 adb serial
-	events  []Event
+	mu        sync.RWMutex
+	devices   map[string]*ManagedDevice // key: 当前 adb serial
+	events    []Event
 	stateFile string
 
 	// 无线的期望目标：例如 USB 优先的那台设备被拔掉后，用它恢复无线连接
@@ -354,13 +353,6 @@ func (m *Manager) updateDevice(d ADBDevice, fallback *ADBDevice) {
 			}
 		}
 		m.devices[d.Serial] = dev
-		addrs := map[string]bool{}
-		for serial, other := range m.devices {
-			if other.WiFiAddr != "" {
-				addrs[serial] = true
-			}
-		}
-		_ = addrs
 	}
 
 	prev := m.lastResult[d.Serial]
@@ -629,14 +621,7 @@ func (m *Manager) addEventLocked(level, message string) {
 	if len(m.events) > maxEvents {
 		m.events = m.events[len(m.events)-maxEvents:]
 	}
-	switch level {
-	case "error":
-		log.Printf("[adb] %s", message)
-	case "warn":
-		log.Printf("[adb] %s", message)
-	default:
-		log.Printf("[adb] %s", message)
-	}
+	log.Printf("[adb] %s", message)
 }
 
 // adbDeviceToAndroidDevice 把注册表记录转换成上游设备列表用的结构（保持字段兼容）。
