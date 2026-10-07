@@ -131,6 +131,46 @@ EACCES → **Controller 线程抛致命异常 → scrcpy 整个进程退出 → 
 同时给浏览器发一条提示消息。真机验证：外部杀掉 scrcpy server 后点「重连」，
 日志出现 `[webrtc] rebuilding agent ... alive=false`，新 server 起来后画面立即恢复。
 
+### 3. 改视频编码器后永久无法串流（选 H265 报 `UNABLE TO ...`）
+
+两个独立原因，都修了：
+
+**(a) 缓存的轨道带着旧编码器。** `NewSubscriber()` 把轨道按设备 ID 缓存在
+`manager.broadcasters[deviceIdentifier]` 里，只在第一次连接时用当时的编码器创建
+（`createAVTrack(videoMimeType, ...)`），此后永不失效：
+
+```
+NewSubscriber: broadcaster, exists := manager.broadcasters[deviceIdentifier]
+               if !exists { createAVTrack(videoMimeType, ...); cache it }
+               peerConnection.AddTrack(broadcaster.VideoTrack)   // ← 旧编码器的轨道
+```
+
+一次 H265 尝试会把 **H265 轨道**缓存下来（即使协商失败也不清理），之后改回 H264 时媒体引擎
+只有 H264，却仍把那条 H265 轨道交给 PeerConnection：
+
+```
+Set Local Description failed: unable to start track, codec is not supported by remote
+```
+
+→ 必须重启 webscreen 才能恢复。修复：给 broadcaster 记下轨道创建时的编码器
+（`CodecKey`），编码器变化时重建轨道。验证日志：
+
+```
+[webrtc] codec changed for android_GM1911_127.0.0.1_0: video/H265+audio/opus -> video/H264+audio/opus, recreating tracks
+```
+
+**(b) Chrome/Chromium 的 WebRTC 不支持 H.265。** 浏览器 SDP offer 里没有 H265/HEVC，
+而服务端按配置只注册了 H265 → 媒体段无法生成：
+
+```
+Create Answer failed: unable to populate media section, RTPSender created with no codecs
+```
+
+这不是能靠改 scrcpy 解决的（浏览器根本不提供该解码器，H.265 目前只有 Safari 等支持）。
+修复：`handleScreenWS` 检查浏览器的 offer，若没提供 H265 就**本次自动回退到 H264**，
+并通过数据通道弹一条提示（`Agent.Notify` → 浏览器 toast）。真机验证：H264/H265 连续切换
+5 次全部正常出画面，选 H265 时弹出「此浏览器不支持 H.265…已改用 H.264」。
+
 ## 端口
 
 APK 默认使用 **8079**（原程序命令行默认是 8081，APK 启动时显式传 `-port 8079`），

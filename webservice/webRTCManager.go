@@ -52,8 +52,12 @@ type DeviceBroadcaster struct {
 	AudioTrack     *webrtc.TrackLocalStaticRTP
 	Agent          *sagent.Agent
 	AgentConfigKey string
-	Subscribers    map[uint32]*Subscriber
-	Lock           sync.RWMutex
+	// CodecKey holds the MIME types the cached tracks were created for. The
+	// tracks carry their codec, so they must be recreated when the codec
+	// changes instead of being reused for an incompatible session.
+	CodecKey    string
+	Subscribers map[uint32]*Subscriber
+	Lock        sync.RWMutex
 }
 
 // agentConfigKey builds a comparable key of everything that shapes the driver,
@@ -159,8 +163,20 @@ func (manager *WebRTCManager) NewSubscriber(deviceIdentifier string, clientSDP s
 	}
 
 	// 1. Get or Create Broadcaster (and its tracks)
+	//
+	// The cached tracks carry the codec they were created for, so a codec change
+	// (e.g. H.264 -> H.265) has to recreate them: reusing an H.265 track in an
+	// H.264 session makes AddTrack/SetLocalDescription fail with "codec is not
+	// supported by remote", and the stream then stays broken until the server is
+	// restarted.
+	codecKey := videoMimeType + "+" + audioMimeType
 	manager.Lock()
 	broadcaster, exists := manager.broadcasters[deviceIdentifier]
+	if exists && broadcaster.CodecKey != codecKey {
+		log.Printf("[webrtc] codec changed for %s: %s -> %s, recreating tracks",
+			deviceIdentifier, broadcaster.CodecKey, codecKey)
+		exists = false
+	}
 	if !exists {
 		videoTrack, audioTrack := createAVTrack(videoMimeType, audioMimeType, AgentConfig.AVSync)
 		if videoTrack == nil && audioTrack == nil {
@@ -169,12 +185,15 @@ func (manager *WebRTCManager) NewSubscriber(deviceIdentifier string, clientSDP s
 			return "", 0, fmt.Errorf("failed to create media tracks")
 		}
 
-		broadcaster = &DeviceBroadcaster{
-			VideoTrack:  videoTrack,
-			AudioTrack:  audioTrack,
-			Subscribers: make(map[uint32]*Subscriber),
+		if broadcaster == nil {
+			broadcaster = &DeviceBroadcaster{
+				Subscribers: make(map[uint32]*Subscriber),
+			}
+			manager.broadcasters[deviceIdentifier] = broadcaster
 		}
-		manager.broadcasters[deviceIdentifier] = broadcaster
+		broadcaster.VideoTrack = videoTrack
+		broadcaster.AudioTrack = audioTrack
+		broadcaster.CodecKey = codecKey
 	}
 	manager.Unlock()
 
