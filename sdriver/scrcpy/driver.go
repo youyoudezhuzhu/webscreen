@@ -82,6 +82,23 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 	da.localMode = utils.IsLocalRootMode()
 	da.adbClient = NewADBClient(config["deviceID"], da.scid, da.ctx)
 
+	// scrcpy defaults video/audio/control to true. The web UI omits them
+	// entirely for a device that was never configured, which would leave the
+	// server waiting for stream sockets that we never open, so apply the same
+	// defaults here and always pass every flag explicitly.
+	if config["video"] == "" {
+		config["video"] = "true"
+	}
+	if config["audio"] == "" {
+		config["audio"] = "true"
+	}
+	if config["control"] == "" {
+		config["control"] = "true"
+	}
+	if config["video_codec"] == "" {
+		config["video_codec"] = "h264"
+	}
+
 	data, err := scrcpyServerData.ReadFile(SCRCPY_EMBED_PATH)
 	if err != nil {
 		log.Printf("[scrcpy] read scrcpy-server failed: %v", err)
@@ -164,11 +181,20 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 	}
 	video_bit_rate_str, ok := config["video_bit_rate"]
 	if !ok || video_bit_rate_str == "" {
+		video_bit_rate_str = "4M"
 		config["video_bit_rate"] = "4M" // 默认 4 Mbps
 	}
 	video_bit_rate, err := utils.ParseBitrate(video_bit_rate_str)
 	if err != nil {
 		return nil, fmt.Errorf("invalid video bit rate: %v", err)
+	}
+	if video_bit_rate <= 0 {
+		// An empty/zero bit rate would be forwarded to scrcpy and the encoder
+		// would not produce any frame (this is what the web UI sends when the
+		// device was never configured), so fall back to a sane default.
+		log.Printf("[scrcpy] invalid video bit rate %q, falling back to 4M", video_bit_rate_str)
+		video_bit_rate = 4_000_000
+		config["video_bit_rate"] = "4M"
 	}
 	codecConfigStr := config["webrtc_codec_level"]
 	if codecConfigStr != "" {
@@ -303,7 +329,7 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 		"scid":                da.scid,
 		"max_size":            strconv.Itoa(max_size),
 		"max_fps":             strconv.Itoa(max_fps),
-		"video":               "true",
+		"video":               config["video"],
 		"video_bit_rate":      strconv.Itoa(video_bit_rate),
 		"video_codec":         config["video_codec"],
 		"video_codec_options": video_codec_options, // bitrate-mode=2 to enable CBR
