@@ -141,6 +141,13 @@ trim-cli app restart webscreen --yes
 ## 8. 已知限制
 
 - 仅 **x86_64** NAS（包内二进制为 linux/amd64）
+- 设备列表默认**隐藏**上游自带的「本机 Linux 桌面」条目（`sdriver/linux` 依赖可抓取的桌面，
+  NAS 上不存在 → 一点投屏必然报 `Failed to connect to recorder after 5 seconds`）。
+  想恢复上游行为：应用设置里加环境变量 `webscreen_hide_local_desktop=0`
+- 已断开/离线的设备会**保留在列表**（便于线缆松动后重连），卡片上有「从列表移除」可清理残留记录
+- **应用中心显示的版本号是安装时写入的**：热更二进制（见 §7）不会改变它。真实升级走应用中心界面
+  （手动安装同名 fpk → 更新，或卸载时选「保留数据」后重装）；CLI 的 `install-fpk` 对已存在应用会拒绝
+  （`10236 应用已存在`），`app update` 只认应用商店来源
 - `H.265` 需要浏览器支持 HEVC（如 Safari）；Chrome/Chromium 的 WebRTC 不支持 H.265，
   服务端会**自动回退到 H.264 并提示**，不会像上游那样直接失败
 - 随包 `adb` 来自 Google Android platform-tools，许可与归属见 `fnpack/app/bin/NOTICE.txt`
