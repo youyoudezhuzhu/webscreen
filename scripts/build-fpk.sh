@@ -35,7 +35,9 @@ with zipfile.ZipFile(zip_path) as z:
 PY
     rm -rf "${tmp}"
 fi
-"${BIN_DIR}/adb" version | head -2
+# 注意：不要用 `adb version | head` —— 在 set -o pipefail 下 adb 会因 SIGPIPE 让整条流水线失败
+adb_info="$("${BIN_DIR}/adb" version 2>&1 || true)"
+printf '%s\n' "${adb_info}" | sed -n '1,2p'
 
 echo "== [3/5] 生成应用图标 =="
 python3 scripts/make-fpk-icons.py fnpack
