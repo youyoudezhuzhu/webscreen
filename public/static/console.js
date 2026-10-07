@@ -165,13 +165,17 @@ function renderDeviceList() {
                     <div class="col-span-full flex flex-col items-center justify-center py-20 text-gray-500 bg-[#1e1f20]/50 rounded-3xl border border-dashed border-gray-700">
                         <span class="material-symbols-rounded text-5xl mb-4 opacity-50">phonelink_off</span>
                         <p class="text-lg">${i18n.t('no_devices') || '没有设备'}</p>
-                        <button onclick="openModal('connectModal')" class="mt-4 text-[var(--md-sys-color-primary)] hover:underline">${i18n.t('connect_device') || '连接设备'}</button>
+                        <div class="flex items-center gap-3 mt-4">
+                            <button onclick="openModal('connectModal')" class="text-[var(--md-sys-color-primary)] hover:underline">${i18n.t('connect_device')}</button>
+                            <span class="text-gray-600">·</span>
+                            <button onclick="addWirelessDevice()" class="text-[var(--md-sys-color-primary)] hover:underline">${i18n.t('add_wireless_device') || '添加无线设备'}</button>
+                        </div>
                     </div>
                 `;
         return;
     }
 
-    visibleDevices.forEach(device => {
+    function buildDeviceCard(device) {
         const serial = typeof device === 'string' ? device : device.device_id;
         const config = ensureDeviceConfig(device);
         const drv = config.driver_config || {};
@@ -217,6 +221,49 @@ function renderDeviceList() {
         tagsHtml += generateBadges(schemaCache['universal'], config);
         tagsHtml += generateBadges(schemaCache[cacheKey], drv);
 
+        // 设备管理信息（USB / 无线、状态机、自定义名称）：由统一 ADB Manager 提供
+        const info = typeof adbInfo === 'function' ? adbInfo(serial) : null;
+        const adbState = (info && info.status) || device.state || '';
+        const displayName = (info && (info.name || info.auto_name)) || device.name || serial;
+        const subLine = (info && info.auto_name && info.auto_name !== displayName)
+            ? info.auto_name
+            : (device.model || '');
+        const connText = (info && info.transport) || device.connection || '';
+        const style = (typeof ADB_STATUS_STYLE === 'object' ? ADB_STATUS_STYLE[adbState] : null) || null;
+        const statusBadge = adbState
+            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${style ? style.chip : 'bg-[#2a2b2c] text-gray-300'}"><span class="w-1.5 h-1.5 rounded-full ${style ? style.dot : 'bg-gray-400'}"></span>${adbStatusText(adbState)}</span>`
+            : '';
+        const connChip = connText
+            ? `<span class="px-2 py-0.5 rounded-full bg-[#2a2b2c] text-[11px] text-gray-300 font-mono">${connText}</span>`
+            : '';
+        const isUnauthorized = adbState === 'UNAUTHORIZED';
+        const canStream = !adbState || adbState === 'ONLINE';
+        const isWireless = String(connText).toUpperCase() === 'WIFI';
+        const adbActionsHtml = info ? `
+                                <button onclick="renameDevice('${serial}')" class="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="${i18n.t('rename_device') || '重命名'}">
+                                    <span class="material-symbols-rounded">edit</span>
+                                </button>
+                                ${isWireless ? `<button onclick="disconnectDevice('${serial}')" class="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="${i18n.t('disconnect') || '断开'}">
+                                    <span class="material-symbols-rounded">link_off</span>
+                                </button>` : ''}
+                                <button onclick="reconnectDevice('${serial}')" class="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="${i18n.t('reconnect') || '重连'}">
+                                    <span class="material-symbols-rounded">refresh</span>
+                                </button>` : '';
+        const unauthorizedHint = isUnauthorized ? `
+                        <div class="mt-3 flex items-start gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
+                            <span class="material-symbols-rounded text-base">phonelink_lock</span>
+                            <span>${i18n.t('usb_unauthorized_hint') || '设备等待 USB 调试授权：请查看手机/平板屏幕，点击“允许 USB 调试”。'}</span>
+                        </div>` : '';
+        const footerAction = canStream
+            ? `<button onclick="startStream('${serial}')" class="w-full py-3 rounded-full bg-[#2a2b2c] group-hover:bg-[var(--md-sys-color-primary)] group-hover:text-[var(--md-sys-color-on-primary)] text-[var(--md-sys-color-primary)] font-medium transition-all flex items-center justify-center gap-2">
+                        <span class="material-symbols-rounded">play_arrow</span>
+                        ${i18n.t('start_stream')}
+                    </button>`
+            : `<button disabled class="w-full py-3 rounded-full bg-[#232425] text-gray-500 font-medium flex items-center justify-center gap-2 cursor-not-allowed">
+                        <span class="material-symbols-rounded">${isUnauthorized ? 'phonelink_lock' : 'phonelink_off'}</span>
+                        ${isUnauthorized ? (i18n.t('waiting_authorization') || '等待授权') : (i18n.t('device_unavailable') || '设备不可用')}
+                    </button>`;
+
         const card = document.createElement('div');
         card.className = `card ${isIgnored ? 'opacity-40 grayscale' : ''} rounded-[24px] p-5 flex flex-col justify-between h-full border border-transparent hover:border-[#444] group transition-all`;
 
@@ -236,10 +283,16 @@ function renderDeviceList() {
                                     <span class="material-symbols-rounded">smartphone</span>
                                 </div>
                                 <div>
-                                    <h3 class="font-medium text-lg leading-tight text-[#e3e3e3] truncate max-w-[140px] md:max-w-[180px]" title="${serial}">${serial}</h3>
+                                    <h3 class="font-medium text-lg leading-tight text-[#e3e3e3] truncate max-w-[140px] md:max-w-[180px]" title="${serial}">${displayName}</h3>
+                                    <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                                        ${connChip}
+                                        ${statusBadge}
+                                    </div>
+                                    ${subLine ? `<div class="text-[11px] text-gray-500 mt-1 truncate max-w-[150px] md:max-w-[190px]" title="${serial}">${subLine}</div>` : ''}
                                 </div>
                             </div>
                             <div class="flex items-center">
+                                ${adbActionsHtml}
                                 ${ignoreBtnHtml}
                                 <button onclick="showConfigModal('${serial}')" class="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
                                     <span class="material-symbols-rounded">settings</span>
@@ -252,12 +305,64 @@ function renderDeviceList() {
                         </div>
                     </div>
 
-                    <button onclick="startStream('${serial}')" class="w-full py-3 rounded-full bg-[#2a2b2c] group-hover:bg-[var(--md-sys-color-primary)] group-hover:text-[var(--md-sys-color-on-primary)] text-[var(--md-sys-color-primary)] font-medium transition-all flex items-center justify-center gap-2">
-                        <span class="material-symbols-rounded">play_arrow</span>
-                        ${i18n.t('start_stream')}
-                    </button>
+                    ${unauthorizedHint}
+                    ${footerAction}
                 `;
         grid.appendChild(card);
+        return card;
+    }
+
+    // 按接入方式分组渲染：USB 设备 / 无线设备 / 其他（本机桌面），
+    // 与需求第 19、22 节一致；同一台手机同时有 USB 与 Wi-Fi 时，
+    // 后端会归并成一条记录（USB 优先），这里只按 transport 分类。
+    const groups = [
+        { key: 'usb', title: i18n.t('usb_devices') || 'USB 设备', icon: 'usb', devices: [] },
+        { key: 'wifi', title: i18n.t('wireless_devices') || '无线设备', icon: 'wifi', devices: [] },
+        { key: 'other', title: i18n.t('other_devices') || '其他设备', icon: 'devices_other', devices: [] },
+    ];
+    visibleDevices.forEach(device => {
+        const serial = typeof device === 'string' ? device : device.device_id;
+        const info = typeof adbInfo === 'function' ? adbInfo(serial) : null;
+        const type = (device.device_type || '').toLowerCase();
+        if (type === 'android') {
+            const transport = (info && info.transport) || device.connection || '';
+            if (String(transport).toUpperCase() === 'USB') groups[0].devices.push(device);
+            else groups[1].devices.push(device);
+        } else {
+            groups[2].devices.push(device);
+        }
+    });
+
+    groups.forEach(group => {
+        // 无线分组即使为空也要显示，否则用户没有"添加无线设备"的入口
+        const alwaysShow = group.key === 'wifi';
+        if (!group.devices.length && !alwaysShow) return;
+        const header = document.createElement('div');
+        header.className = 'col-span-full flex items-center justify-between mt-2 mb-1 first:mt-0';
+        const addBtn = group.key === 'wifi'
+            ? `<button onclick="addWirelessDevice()" class="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#2a2b2c] hover:bg-[#333] text-[var(--md-sys-color-primary)] text-sm font-medium transition-colors">
+                   <span class="material-symbols-rounded text-lg">add</span>${i18n.t('add_wireless_device') || '添加无线设备'}
+               </button>`
+            : '';
+        header.innerHTML = `
+            <div class="flex items-center gap-2 text-gray-400">
+                <span class="material-symbols-rounded text-xl">${group.icon}</span>
+                <span class="text-sm font-medium tracking-wide">${group.title}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-[#2a2b2c]">${group.devices.length}</span>
+            </div>
+            ${addBtn}`;
+        grid.appendChild(header);
+        if (!group.devices.length) {
+            const empty = document.createElement('div');
+            empty.className = 'col-span-full text-xs text-gray-500 mb-3 px-1';
+            empty.textContent = i18n.t('no_wireless_devices') || '暂无无线设备：点击右上角「添加无线设备」，填手机的 无线调试 地址（ip:端口）即可接入。';
+            grid.appendChild(empty);
+            return;
+        }
+        group.devices.forEach(device => {
+            const card = buildDeviceCard(device);
+            if (card) grid.appendChild(card);
+        });
     });
 }
 
@@ -686,5 +791,202 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
+// ---------------------------------------------------------------------------
+// 设备管理（USB / 无线）：状态徽章、重命名、断开/重连、添加无线设备、事件日志
+// 数据来自统一 ADB Manager：/api/adb/devices 与 /api/adb/events
+// ---------------------------------------------------------------------------
+
+const ADB_STATUS_STYLE = {
+    ONLINE:       { chip: 'bg-emerald-500/15 text-emerald-300', dot: 'bg-emerald-400' },
+    UNAUTHORIZED: { chip: 'bg-amber-500/15 text-amber-300',     dot: 'bg-amber-400' },
+    CONNECTING:   { chip: 'bg-sky-500/15 text-sky-300',         dot: 'bg-sky-400' },
+    OFFLINE:      { chip: 'bg-gray-500/15 text-gray-300',       dot: 'bg-gray-400' },
+    DISCONNECTED: { chip: 'bg-gray-500/15 text-gray-400',       dot: 'bg-gray-500' },
+    ERROR:        { chip: 'bg-red-500/15 text-red-300',         dot: 'bg-red-400' },
+};
+
+const ADB_STATUS_TEXT = {
+    ONLINE:       { zh: '在线', en: 'Online' },
+    UNAUTHORIZED: { zh: '等待授权', en: 'Unauthorized' },
+    CONNECTING:   { zh: '连接中', en: 'Connecting' },
+    OFFLINE:      { zh: '离线', en: 'Offline' },
+    DISCONNECTED: { zh: '已断开', en: 'Disconnected' },
+    ERROR:        { zh: '错误', en: 'Error' },
+};
+
+function adbStatusText(state) {
+    const label = ADB_STATUS_TEXT[state];
+    if (!label) return state;
+    const lang = (window.i18n && i18n.lang) ? i18n.lang : 'zh';
+    return lang === 'en' ? label.en : label.zh;
+}
+
+let adbDeviceMap = {};
+
+function adbInfo(serial) {
+    return adbDeviceMap[serial] || null;
+}
+
+async function loadADBDevices() {
+    try {
+        const res = await fetch('/api/adb/devices');
+        if (!res.ok) return false;
+        const data = await res.json();
+        adbDeviceMap = {};
+        (data.devices || []).forEach(d => { adbDeviceMap[d.serial] = d; });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function loadADBEvents() {
+    try {
+        const res = await fetch('/api/adb/events?limit=30');
+        if (!res.ok) return;
+        const data = await res.json();
+        renderADBEvents(data.events || []);
+    } catch (e) { /* 忽略：老版本没有这个接口 */ }
+}
+
+function renderADBEvents(events) {
+    const box = document.getElementById('adbEventList');
+    if (!box) return;
+    if (!events.length) {
+        box.innerHTML = `<div class="text-xs text-gray-500 px-1 py-2">${i18n.t('no_events') || '暂无设备事件'}</div>`;
+        return;
+    }
+    const color = { info: 'text-gray-300', warn: 'text-amber-300', error: 'text-red-300' };
+    box.innerHTML = events.map(ev => `
+        <div class="flex items-start gap-3 px-1 py-1.5 border-b border-[#262728] last:border-0">
+            <span class="text-[11px] text-gray-500 font-mono whitespace-nowrap mt-0.5">${ev.time}</span>
+            <span class="text-xs ${color[ev.level] || 'text-gray-300'}">${ev.message}</span>
+        </div>`).join('');
+}
+
+// 简易输入弹窗（fnOS 面板是 iframe，window.prompt 可能被沙箱禁用）
+function dmPrompt(title, initial, placeholder) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999';
+        overlay.innerHTML = `
+            <div style="width:min(420px,92vw);background:#1e1f20;border:1px solid #333;border-radius:24px;padding:22px">
+                <div style="color:#e3e3e3;font-weight:500;margin-bottom:14px">${title}</div>
+                <input id="dmPromptInput" value="${initial || ''}" placeholder="${placeholder || ''}"
+                       style="width:100%;background:#2a2b2c;border:1px solid #3a3b3c;border-radius:12px;padding:11px 13px;color:#e3e3e3;outline:none;font-family:inherit">
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+                    <button id="dmPromptCancel" style="padding:9px 18px;border-radius:999px;background:transparent;border:1px solid #3a3b3c;color:#bbb">${i18n.t('cancel') || '取消'}</button>
+                    <button id="dmPromptOk" style="padding:9px 18px;border-radius:999px;background:var(--md-sys-color-primary);color:var(--md-sys-color-on-primary);border:0;font-weight:500">${i18n.t('confirm') || '确定'}</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#dmPromptInput');
+        input.focus();
+        if (initial) input.select();
+        const done = value => { overlay.remove(); resolve(value); };
+        overlay.querySelector('#dmPromptOk').onclick = () => done(input.value.trim());
+        overlay.querySelector('#dmPromptCancel').onclick = () => done(null);
+        overlay.addEventListener('keydown', e => {
+            if (e.key === 'Enter') done(input.value.trim());
+            if (e.key === 'Escape') done(null);
+        });
+    });
+}
+
+async function adbPost(path, body) {
+    const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* 空响应 */ }
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+}
+
+async function renameDevice(serial) {
+    const info = adbInfo(serial) || {};
+    const name = await dmPrompt(i18n.t('rename_device') || '设备名称', info.name || info.auto_name || '', info.auto_name || '');
+    if (name === null) return;
+    try {
+        await adbPost('/api/adb/device/name', { serial, name });
+        showToast(i18n.t('device_renamed') || '设备名称已更新');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+    await refreshDevices();
+}
+
+async function disconnectDevice(serial) {
+    try {
+        await adbPost('/api/adb/device/disconnect', { serial });
+        showToast(i18n.t('device_disconnected') || '已断开');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+    await refreshDevices();
+}
+
+async function reconnectDevice(serial) {
+    try {
+        await adbPost('/api/adb/device/reconnect', { serial });
+        showToast(i18n.t('reconnecting') || '正在重连…');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+    await refreshDevices();
+}
+
+async function addWirelessDevice() {
+    const addr = await dmPrompt(i18n.t('add_wireless_device') || '添加无线设备', '', '192.168.31.120:5555');
+    if (!addr) return;
+    showToast(i18n.t('connecting') || '正在连接…');
+    try {
+        await adbPost('/api/adb/device/wifi', { address: addr });
+        showToast(i18n.t('wireless_added') || '无线设备已连接');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+    await refreshDevices();
+}
+
+// 设备列表 + 事件日志一起刷新（页面不可见时不打扰）
+async function refreshDevices() {
+    await loadADBDevices();
+    const grid = document.getElementById('deviceGrid');
+    if (grid) renderDeviceList();
+    loadADBEvents();
+}
+
+function ensureADBPanels() {
+    const grid = document.getElementById('deviceGrid');
+    if (!grid || document.getElementById('adbEventPanel')) return;
+    const panel = document.createElement('section');
+    panel.id = 'adbEventPanel';
+    panel.className = 'mt-8 rounded-[24px] bg-[#1e1f20] border border-[#262728] p-5';
+    panel.innerHTML = `
+        <div class="flex items-center gap-2 text-gray-300 mb-3">
+            <span class="material-symbols-rounded text-xl">receipt_long</span>
+            <span class="text-sm font-medium">${i18n.t('device_events') || '设备事件'}</span>
+        </div>
+        <div id="adbEventList" class="max-h-56 overflow-y-auto"></div>`;
+    grid.insertAdjacentElement('afterend', panel);
+}
+
+async function initDeviceManager() {
+    const available = await loadADBDevices();
+    if (!available) return; // 本机 root 模式或旧版本：没有设备管理接口
+    ensureADBPanels();
+    renderDeviceList();
+    loadADBEvents();
+    setInterval(() => {
+        if (document.visibilityState === 'visible') refreshDevices();
+    }, 3000);
+}
+
 // Initialize
-document.addEventListener('DOMContentLoaded', fetchDevices);
+document.addEventListener('DOMContentLoaded', () => {
+    fetchDevices();
+    initDeviceManager();
+});
