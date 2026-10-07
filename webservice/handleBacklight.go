@@ -1,0 +1,107 @@
+package webservice
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"webscreen/utils"
+)
+
+// 受控端背光控制（隐私保护：屏幕黑、但不锁屏、串流与触控照常）。
+//
+// 为什么不按电源键：KEYCODE_POWER 会让设备熄屏并**锁定**，恢复时需要解锁，
+// 与"串流仍可操作"的目标冲突。这里只把 backlight 的 brightness 写 0：
+// 面板停止发光，设备保持唤醒状态，触摸/按键/串流全部正常。
+//
+// 关闭前会记录每个背光节点的原值与 max，恢复到文件里；恢复优先写回原值，
+// 原值不可用时退回 max_brightness。
+const backlightOffScript = `
+prev=/data/local/tmp/webscreen_backlight_prev
+: > "$prev"
+for d in /sys/class/backlight/*/; do
+  f="${d}brightness"
+  [ -w "$f" ] || continue
+  cur=$(cat "$f" 2>/dev/null || echo 0)
+  max=$(cat "${d}max_brightness" 2>/dev/null || echo 0)
+  [ "$cur" -gt 0 ] 2>/dev/null || continue
+  echo "$d $cur $max" >> "$prev"
+  echo 0 > "$f"
+done
+`
+
+const backlightOnScript = `
+prev=/data/local/tmp/webscreen_backlight_prev
+if [ -s "$prev" ]; then
+  while read -r d cur max; do
+    f="${d}brightness"
+    [ -w "$f" ] || continue
+    v=$cur
+    [ "$v" -gt 0 ] 2>/dev/null || v=$max
+    [ "$v" -gt 0 ] 2>/dev/null || v=255
+    echo "$v" > "$f"
+  done < "$prev"
+  : > "$prev"
+else
+  for d in /sys/class/backlight/*/; do
+    f="${d}brightness"
+    [ -w "$f" ] || continue
+    max=$(cat "${d}max_brightness" 2>/dev/null || echo 0)
+    [ "$max" -gt 0 ] 2>/dev/null && echo "$max" > "$f"
+  done
+fi
+`
+
+type backlightRequest struct {
+	Serial string `json:"serial"`
+	Off    *bool  `json:"off"`
+}
+
+// runDeviceShell 在受控设备上以 root 执行一段 shell：
+//   - serial 非空 → 通过 adb（NAS 托管模式，webscreen 跑在 NAS 上）
+//   - serial 为空 → 直接在本机执行（APK 内嵌模式，服务就跑在手机里）
+func runDeviceShell(serial, script string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if strings.TrimSpace(serial) == "" {
+		cmd := exec.CommandContext(ctx, "/system/bin/su", "-c", script)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	adbPath, err := utils.GetADBPath()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, adbPath, "-s", serial, "shell", "su", "-c", script)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (wm *WebMaster) handleBacklight(c *gin.Context) {
+	var req backlightRequest
+	if err := c.BindJSON(&req); err != nil || req.Off == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"result": "error", "message": "invalid request"})
+		return
+	}
+
+	script := backlightOnScript
+	if *req.Off {
+		script = backlightOffScript
+	}
+
+	out, err := runDeviceShell(req.Serial, script)
+	if err != nil {
+		log.Printf("[backlight] failed serial=%q off=%v: %v (%s)", req.Serial, *req.Off, err, strings.TrimSpace(out))
+		c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": strings.TrimSpace(out + " " + err.Error())})
+		return
+	}
+	log.Printf("[backlight] serial=%q off=%v ok", req.Serial, *req.Off)
+	c.JSON(http.StatusOK, gin.H{"result": "success", "off": *req.Off})
+}

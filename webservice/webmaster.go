@@ -105,6 +105,9 @@ func (wm *WebMaster) setRouter() {
 		api.POST("/adb/device/remove", wm.handleADBRemove)
 		api.POST("/adb/device/disconnect", wm.handleADBDisconnect)
 		api.POST("/adb/device/reconnect", wm.handleADBReconnect)
+
+		// 受控端背光（隐私保护：屏幕黑，但不锁屏，串流照常）
+		api.POST("/screen/backlight", wm.handleBacklight)
 	}
 
 	wm.router = r
