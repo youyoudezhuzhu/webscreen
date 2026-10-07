@@ -1,0 +1,33 @@
+[
+    {
+        "stepTitle": "WebScreen 运行配置",
+        "items": [
+            {
+                "type": "radio",
+                "field": "wizard_webscreen_run_user",
+                "label": "运行权限",
+                "initValue": "root",
+                "options": [
+                    {
+                        "label": "超级管理员 (Root) - 推荐，USB ADB 需要访问 /dev/bus/usb",
+                        "value": "root"
+                    },
+                    {
+                        "label": "普通用户 (Package) - 仅 Wi-Fi ADB 可用",
+                        "value": "package"
+                    }
+                ],
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请选择运行权限"
+                    }
+                ]
+            },
+            {
+                "type": "tips",
+                "helpText": "<strong>说明：</strong>WebScreen 通过 ADB 连接 Android 设备。USB 有线连接需要访问 <code>/dev/bus/usb</code>，因此默认以 root 运行；若只使用 Wi-Fi ADB，可选择普通用户。该选项仅限安装时选定。"
+            }
+        ]
+    }
+]

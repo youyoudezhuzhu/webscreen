@@ -1,0 +1,12 @@
+#!/bin/bash
+
+### This script is called after the user change environment variables in application setting page.
+### 端口变化需要重启应用后生效，这里重启一次让配置立即生效。
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] 配置已更新，正在重启 webscreen 使端口等设置生效..." >> "${LOG_FILE}"
+
+"${TRIM_APPDEST}/cmd/main" stop >/dev/null 2>&1 || true
+"${TRIM_APPDEST}/cmd/main" start >/dev/null 2>&1 || true
+
+exit 0

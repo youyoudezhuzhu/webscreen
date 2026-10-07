@@ -1,0 +1,44 @@
+name: Build fnOS FPK
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "fnpack/**"
+      - "scripts/build-fpk.sh"
+      - "scripts/make-fpk-icons.py"
+      - ".github/workflows/build-fpk.yml"
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "public/**"
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-fpk:
+    name: Build fnOS FPK (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Build fpk
+        run: bash scripts/build-fpk.sh
+
+      - name: Show package info
+        run: |
+          ls -la fnpack/*.fpk
+          sha256sum fnpack/*.fpk
+
+      - name: Upload WebScreen.fpk
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebScreen-fpk
+          path: fnpack/*.fpk
+          if-no-files-found: error

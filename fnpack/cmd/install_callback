@@ -1,0 +1,34 @@
+#!/bin/bash
+
+### This script is called after the user installs the application.
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" >> "${LOG_FILE}"
+}
+
+log_msg "开始执行应用安装初始化回调 (install_callback)..."
+
+# 1. 预建运行数据目录
+mkdir -p "${TRIM_PKGVAR}" "${TRIM_PKGHOME}" 2>/dev/null || true
+
+# 2. 二进制必须可执行（fnpack 打包时已带权限，这里兜底）
+chmod +x "${TRIM_APPDEST}/bin/webscreen" 2>/dev/null || true
+chmod +x "${TRIM_APPDEST}/bin/adb" 2>/dev/null || true
+
+# 3. 清理可能残留的 socket / pid / 标记文件
+rm -f "${TRIM_APPDEST}/web.sock" \
+      "${TRIM_PKGVAR}/app.pid" \
+      "${TRIM_PKGVAR}/adb-started-by-app"
+
+# 4. USB ADB 需要访问 USB 总线：应用以 root 运行即可，这里只做可用性记录
+if [ -d /dev/bus/usb ]; then
+    log_msg "检测到 /dev/bus/usb，USB ADB 可用（应用以 root 运行）。"
+else
+    log_msg "未检测到 /dev/bus/usb，本机将只能使用 Wi-Fi ADB。"
+fi
+
+log_msg "应用安装初始化回调执行完成。"
+
+exit 0

@@ -1,0 +1,20 @@
+#!/bin/bash
+
+### This script is called after the user upgrades the application.
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" >> "${LOG_FILE}"
+}
+
+log_msg "开始执行应用升级回调 (upgrade_callback)..."
+
+# 升级只替换 app/（二进制与前端），数据目录不动：设备列表、名称与设置都保留
+chmod +x "${TRIM_APPDEST}/bin/webscreen" 2>/dev/null || true
+chmod +x "${TRIM_APPDEST}/bin/adb" 2>/dev/null || true
+rm -f "${TRIM_APPDEST}/web.sock" "${TRIM_PKGVAR}/app.pid"
+
+log_msg "应用升级回调执行完成（数据已保留）。"
+
+exit 0

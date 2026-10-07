@@ -1,0 +1,147 @@
+#!/bin/bash
+### WebScreen 应用主控脚本：start / stop / status
+### 由 fnOS 应用中心调用，负责拉起 webscreen 服务与它依赖的 adb。
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+APP_LOG="${TRIM_PKGVAR}/webscreen.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+ADB_FLAG="${TRIM_PKGVAR}/adb-started-by-app"
+BIN_DIR="${TRIM_APPDEST}/bin"
+PORT="${webscreen_port:-8079}"
+
+RUN_USER="${wizard_webscreen_run_user:-root}"
+[ "${RUN_USER}" = "package" ] && RUN_USER="webscreen"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" >> "${LOG_FILE}"
+}
+
+log_err() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" >> "${LOG_FILE}"
+}
+
+check_process() {
+    kill -0 "$1" 2>/dev/null
+}
+
+status() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pid}" ] && check_process "${pid}"; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+# 启动 adb server：USB 设备必须靠它枚举与授权。
+# 若本机原本没有 adb server，则记录标记，停止应用时才由我们关掉，
+# 避免影响 NAS 上其它使用 adb 的程序。
+start_adb() {
+    if ! ss -ltn 2>/dev/null | grep -q ':5037 '; then
+        echo 1 > "${ADB_FLAG}"
+    else
+        rm -f "${ADB_FLAG}"
+    fi
+    if [ -x "${BIN_DIR}/adb" ]; then
+        ( cd "${BIN_DIR}" && ./adb start-server ) >> "${APP_LOG}" 2>&1 || log_err "adb start-server 执行失败"
+    else
+        log_err "未找到 ${BIN_DIR}/adb，USB/Wi-Fi ADB 均不可用"
+    fi
+}
+
+start_process() {
+    if status; then
+        log_msg "webscreen 已在运行，忽略本次启动请求。"
+        return 0
+    fi
+
+    mkdir -p "${TRIM_PKGVAR}"
+    touch "${APP_LOG}"
+    : > "${APP_LOG}"
+
+    # webscreen 通过 GetADBPath() 先找 ./adb，因此必须在其安装目录启动
+    cd "${BIN_DIR}" || return 1
+    chmod +x "${BIN_DIR}/webscreen" "${BIN_DIR}/adb" 2>/dev/null || true
+
+    start_adb
+
+    log_msg "正在启动 webscreen (端口=${PORT}, 运行用户=${RUN_USER}, 目录=${BIN_DIR})..."
+    if [ "${RUN_USER}" != "root" ] && id "${RUN_USER}" >/dev/null 2>&1; then
+        su -s /bin/bash "${RUN_USER}" -c "cd ${BIN_DIR} && exec ./webscreen -host 0.0.0.0 -port ${PORT}" >> "${APP_LOG}" 2>&1 &
+    else
+        bash -c "cd ${BIN_DIR} && exec ./webscreen -host 0.0.0.0 -port ${PORT}" >> "${APP_LOG}" 2>&1 &
+    fi
+    local pid=$!
+    printf "%s" "${pid}" > "${PID_FILE}"
+
+    sleep 2
+    if ! check_process "${pid}"; then
+        log_err "webscreen 启动失败（PID ${pid} 意外退出）。"
+        tail -n 20 "${APP_LOG}" >> "${LOG_FILE}" 2>/dev/null
+        rm -f "${PID_FILE}"
+        return 1
+    fi
+
+    log_msg "webscreen 已启动 (PID=${pid})。"
+    return 0
+}
+
+stop_process() {
+    log_msg "正在停止 webscreen..."
+
+    if [ -r "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pid}" ] && check_process "${pid}"; then
+            kill -TERM "${pid}" 2>/dev/null || true
+            local count=0
+            while check_process "${pid}" && [ ${count} -lt 5 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            if check_process "${pid}"; then
+                log_err "webscreen (PID ${pid}) 未在 5 秒内退出，发送 SIGKILL。"
+                kill -KILL "${pid}" 2>/dev/null || true
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+
+    # 兜底清理：webscreen 自身与它拉起的 scrcpy server，都不能留残留进程
+    pkill -f "${BIN_DIR}/webscreen" 2>/dev/null || true
+    pkill -f "[c]om.genymobile.scrcpy.Server" 2>/dev/null || true
+
+    # 仅当 adb server 是由本应用启动时才关闭
+    if [ -f "${ADB_FLAG}" ]; then
+        if [ -x "${BIN_DIR}/adb" ]; then
+            ( cd "${BIN_DIR}" && ./adb kill-server ) >> "${APP_LOG}" 2>&1 || true
+        fi
+        rm -f "${ADB_FLAG}"
+    fi
+
+    rm -f "${TRIM_APPDEST}/web.sock"
+    log_msg "webscreen 已停止，残留进程已清理。"
+    return 0
+}
+
+case $1 in
+start)
+    start_process
+    ;;
+stop)
+    stop_process
+    ;;
+status)
+    if status; then
+        exit 0
+    else
+        exit 3
+    fi
+    ;;
+*)
+    exit 1
+    ;;
+esac

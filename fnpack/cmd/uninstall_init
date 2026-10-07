@@ -1,0 +1,10 @@
+#!/bin/bash
+
+### This script is called before the user uninstalls the application.
+
+# 先清干净属于本应用的进程，避免卸载后 webscreen / scrcpy 残留
+pkill -f "${TRIM_APPDEST}/bin/webscreen" 2>/dev/null || true
+pkill -f "[c]om.genymobile.scrcpy.Server" 2>/dev/null || true
+rm -f "${TRIM_APPDEST}/web.sock" "${TRIM_PKGVAR}/app.pid" "${TRIM_PKGVAR}/adb-started-by-app"
+
+exit 0

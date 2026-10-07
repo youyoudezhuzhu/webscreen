@@ -21,3 +21,10 @@ local.properties
 *.iml
 .idea/
 .kotlin/
+
+# fnOS fpk packaging: build outputs (fnpack tool itself IS committed)
+fnpack/app/bin/webscreen
+fnpack/app/bin/NOTICE.txt
+fnpack/*.fpk
+fnpack/*.tgz
+fnpack/*.tar

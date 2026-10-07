@@ -1,0 +1,12 @@
+appname               = webscreen
+version               = 0.1.0
+display_name          = WebScreen
+desc                  = WebScreen 是运行在飞牛 NAS 上的 Android 投屏与控制服务：通过 USB 有线 ADB 或 Wi-Fi ADB 连接 Android 设备，在浏览器里查看并操作手机屏幕（视频、音频、鼠标、键盘、触摸、剪贴板），支持多台设备同时在线。<br/>• WebScreen 控制台：设备列表与投屏画面<br/>• 管理面板：启动、停止、状态与日志
+platform              = x86
+source                = thirdparty
+maintainer            = youyoudezhuzhu
+distributor           = youyoudezhuzhu
+distributor_url       = https://github.com/youyoudezhuzhu/webscreen
+desktop_uidir         = ui
+desktop_applaunchname = webscreen.Application
+micro_app             = true
