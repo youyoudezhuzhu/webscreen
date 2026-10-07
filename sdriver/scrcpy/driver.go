@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"webscreen/sdriver"
 	"webscreen/sdriver/comm"
@@ -50,6 +51,10 @@ type ScrcpyDriver struct {
 	// handle of the locally started scrcpy server
 	localServerCmd *exec.Cmd
 	localServerCtx context.Context
+
+	// dead becomes true as soon as the scrcpy session is gone, so that a new
+	// session rebuilds the pipeline instead of reusing a dead one.
+	dead atomic.Bool
 
 	cacheMutex         sync.RWMutex
 	LastVPS            []byte
@@ -448,6 +453,26 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 	// da.audioConn.(*net.TCPConn).SetReadBuffer(64 * 1024)
 
 	return da, nil
+}
+
+// Alive reports whether the scrcpy session is still usable. A driver becomes
+// dead when the scrcpy server exits or one of the stream connections breaks
+// (e.g. the UHID controller error that kills the server), and must not be
+// reused for a new session in that case.
+func (da *ScrcpyDriver) Alive() bool {
+	return !da.dead.Load()
+}
+
+// markDead flags the session as broken exactly once.
+func (da *ScrcpyDriver) markDead(reason string) {
+	if da.dead.CompareAndSwap(false, true) {
+		log.Printf("[scrcpy] session is dead: %s", reason)
+		// Non blocking: tell the connected browsers why the stream stopped.
+		select {
+		case da.ControlChan <- sdriver.TextMsgEvent{Msg: "[scrcpy] " + reason + "，请重新连接"}:
+		default:
+		}
+	}
 }
 
 func (da *ScrcpyDriver) ShowDeviceInfo() {

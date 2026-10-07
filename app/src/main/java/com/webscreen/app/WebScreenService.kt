@@ -127,9 +127,18 @@ class WebScreenService : Service() {
         if (running != null) {
             running.destroy()
         }
-        // The binary runs through `exec`, so killing our child is enough; the
-        // scrcpy server it spawned is stopped as well.
-        RootShell.run(listOf("pkill", "-f", "[w]ebscreen/webscreen"), timeoutSeconds = 15)
+        // The binary runs through `exec`, so killing our child stops the server.
+        // Its scrcpy server is a grandchild and must be killed too, otherwise it
+        // keeps holding the abstract socket and the next session cannot start.
+        // Both patterns use the [x] trick so that pkill does not match the
+        // shell that is running it.
+        RootShell.run(
+            listOf(
+                "pkill", "-f", "[c]om.genymobile.scrcpy.Server", ";",
+                "pkill", "-f", "[w]ebscreen/webscreen"
+            ),
+            timeoutSeconds = 20
+        )
         ServerState.setRunning(false)
         ServerState.append("[app] webscreen stopped")
         process = null

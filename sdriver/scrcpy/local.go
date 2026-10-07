@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -34,11 +35,52 @@ const (
 	LOCAL_WORK_DIR = "/data/local/tmp/webscreen"
 	// LOCAL_SERVER_PATH is where scrcpy-server is stored on the device.
 	LOCAL_SERVER_PATH = LOCAL_WORK_DIR + "/scrcpy-server"
+	// UHID_DEVICE is the uinput/hid device scrcpy uses for virtual input.
+	UHID_DEVICE = "/dev/uhid"
+	// AID_UHID is the Android uid/gid owning the uhid device group.
+	AID_UHID = 3011
 
 	// LOCAL_CONNECT_TIMEOUT is how long we wait for the scrcpy server to
 	// create its listener.
 	LOCAL_CONNECT_TIMEOUT = 15 * time.Second
 )
+
+// appendUniqueGroup appends g unless it is already present.
+func appendUniqueGroup(groups []uint32, g uint32) []uint32 {
+	for _, existing := range groups {
+		if existing == g {
+			return groups
+		}
+	}
+	return append(groups, g)
+}
+
+// localServerGroups returns the supplementary groups the locally started
+// scrcpy server must keep.
+//
+// scrcpy drops privileges to the shell uid as soon as it starts, but it keeps
+// this process' supplementary groups, and /dev/uhid is 0660 uhid:uhid. Without
+// the uhid group, virtual mouse/keyboard/gamepad input fails with
+//
+//	open failed: EACCES (Permission denied)   (UhidManager.open)
+//
+// and the controller thread then kills the whole scrcpy server, which freezes
+// the stream.
+func localServerGroups() []uint32 {
+	groups := []uint32{0}
+	if current, err := os.Getgroups(); err == nil {
+		for _, g := range current {
+			groups = appendUniqueGroup(groups, uint32(g))
+		}
+	}
+	gid := uint32(AID_UHID)
+	if fi, err := os.Stat(UHID_DEVICE); err == nil {
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Gid != 0 {
+			gid = st.Gid
+		}
+	}
+	return appendUniqueGroup(groups, gid)
+}
 
 var (
 	localEncodersOnce sync.Once
@@ -183,6 +225,17 @@ func (da *ScrcpyDriver) startLocalScrcpyServer(options map[string]string) error 
 	cmd.Dir = LOCAL_WORK_DIR
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if os.Geteuid() == 0 {
+		// Keep the uhid group (see localServerGroups) so that the virtual input
+		// devices can be created once scrcpy dropped to the shell uid.
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid:    0,
+				Gid:    0,
+				Groups: localServerGroups(),
+			},
+		}
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start scrcpy server failed: %v", err)
@@ -196,6 +249,7 @@ func (da *ScrcpyDriver) startLocalScrcpyServer(options map[string]string) error 
 		} else {
 			log.Println("[scrcpy] local scrcpy server exited normally")
 		}
+		da.markDead("scrcpy server 已退出")
 	}()
 
 	return nil
@@ -208,11 +262,10 @@ func (da *ScrcpyDriver) stopLocalServer() {
 			log.Printf("[scrcpy] kill scrcpy server failed: %v", err)
 		}
 	}
-	// Best effort cleanup of a scrcpy server that outlived us.
-	go func() {
-		cmd := exec.Command("/system/bin/sh", "-c", "pkill -f com.genymobile.scrcpy.Server 2>/dev/null; true")
-		_ = cmd.Run()
-	}()
+	// Deliberately no blanket `pkill -f com.genymobile.scrcpy.Server` here: the
+	// agent may be rebuilt right away (dead pipeline or changed settings) and an
+	// asynchronous pkill would kill the freshly started server as well.
+	// The app kills leftover servers itself when the whole service is stopped.
 }
 
 // cleanupTunnel releases the transport resources of the current session.
@@ -279,9 +332,13 @@ func LocalSupportsOpusAudio() bool {
 func LocalVideoEncoderList() []string {
 	localEncodersOnce.Do(func() {
 		content := readLocalCodecXML()
-		nameRe := regexp.MustCompile(`name="([^"]*encoder[^"]*)"`)
+		// Same rule as the adb based path: only <MediaCodec> entries whose name
+		// contains "encoder" and which are video codecs. This keeps non-encoder
+		// entries (e.g. <Feature name="max-video-encoder-input-buffers">) out of
+		// the list, they can never be used as a video_encoder.
+		nameRe := regexp.MustCompile(`<MediaCodec name="([^"]*encoder[^"]*)"`)
 		for _, line := range strings.Split(content, "\n") {
-			if !strings.Contains(strings.ToLower(line), "video") {
+			if !strings.Contains(strings.ToLower(line), "video/") {
 				continue
 			}
 			m := nameRe.FindStringSubmatch(line)

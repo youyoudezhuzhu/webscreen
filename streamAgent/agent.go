@@ -94,6 +94,19 @@ func (sa *Agent) Close() {
 	}
 }
 
+// Alive reports whether the underlying driver session is still usable. It is
+// used to drop a dead pipeline (crashed scrcpy server, broken socket) instead
+// of reusing it for the next session.
+func (sa *Agent) Alive() bool {
+	if sa.driver == nil {
+		return false
+	}
+	if a, ok := sa.driver.(interface{ Alive() bool }); ok {
+		return a.Alive()
+	}
+	return true
+}
+
 func (sa *Agent) GetCodecInfo() (string, string) {
 	m := sa.driver.MediaMeta()
 	return m.VideoCodec, m.AudioCodec

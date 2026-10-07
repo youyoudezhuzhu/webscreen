@@ -108,4 +108,5 @@ func (sd *ScrcpyDriver) Stop() {
 		sd.adbClient.Stop()
 	}
 	sd.cancel()
+	sd.markDead("会话已停止")
 }

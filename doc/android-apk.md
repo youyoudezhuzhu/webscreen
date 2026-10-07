@@ -89,6 +89,48 @@ cp dist/webscreen-android-arm64 app/src/main/jniLibs/arm64-v8a/libwebscreen.so
 服务跑在前台 Service 里：关掉 Activity 或关掉浏览器都不会停；屏幕熄灭也能继续
 （Android 14+ 使用 `specialUse` 类型的前台服务，Android 13+ 会请求通知权限）。
 
+## 已修复的两个上游 bug（真机日志定位）
+
+这两个都是**上游 webscreen/scrcpy 交互本身就有的问题**（在 PC + adb 的用法下同样会出现），
+本 fork 修掉了它们：
+
+### 1. 点 HID 输入后整个流卡死
+
+日志（手机侧 scrcpy server）：
+
+```
+[server] ERROR: Controller error
+java.io.IOException: android.system.ErrnoException: open failed: EACCES (Permission denied)
+        at com.genymobile.scrcpy.control.UhidManager.open(UhidManager.java:84)
+→ 之后：Control connection read error: EOF / Failed to read scrcpy frame header: EOF
+       / [scrcpy] local scrcpy server exited / write: broken pipe
+```
+
+机制：UHID（虚拟鼠标/键盘/手柄）要在设备上打开 `/dev/uhid`（`0660 uhid:uhid`）。
+scrcpy server 启动后会把自己 `setuid(2000)`（shell），但**保留启动者的补充组**；
+本机模式下启动者是我们以 root 运行的 webscreen（组只有 `0`），于是既不是 owner 也不在 `uhid` 组 →
+EACCES → **Controller 线程抛致命异常 → scrcpy 整个进程退出 → 视频永久定格**。
+
+修复：本机模式启动 scrcpy server 时显式带上 `uhid` 组（读 `/dev/uhid` 的 gid，回退 `AID_UHID=3011`），
+真机验证 `Groups: 0 3011`，点 UHID Mouse 后帧数持续增长（不再冻结）。
+
+> 注：adb（PC 用法）路径下 `adb shell` 本身就在 `uhid` 组里，所以通常不会踩这个权限问题；
+> 但若设备/内核缺少 uhid 支持导致打开失败，上游同样会「一个 UHID 错误杀掉整个会话」。
+
+### 2. 会话一旦死掉就再也连不上（改设置后表现最明显）
+
+日志里 `starting local scrcpy server` 只出现 2 次，而 `Received connection driver config` 出现 4 次：
+第一次会话死后，后续每次「连接/改设置后重连」都**复用了缓存里那个已死的 Agent**，
+于是只有 `write: broken pipe`，再也出不了画面，必须重启 webscreen 服务。
+
+机制：`ensureAgent()` 只在 `broadcaster.Agent == nil` 时新建 Agent，
+既不检查旧 session 是否还活着，也不管驱动配置是否变了（所以改码率/编码器也不会生效）。
+
+修复：驱动增加 `Alive()`（scrcpy server 退出、视频/音频/控制任一通道 EOF 即标记死亡），
+`ensureAgent()` 在「Agent 已死」或「驱动配置变化」时丢弃旧 Agent 并重建；
+同时给浏览器发一条提示消息。真机验证：外部杀掉 scrcpy server 后点「重连」，
+日志出现 `[webrtc] rebuilding agent ... alive=false`，新 server 起来后画面立即恢复。
+
 ## 端口
 
 APK 默认使用 **8079**（原程序命令行默认是 8081，APK 启动时显式传 `-port 8079`），
