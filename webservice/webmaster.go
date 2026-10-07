@@ -99,6 +99,7 @@ func (wm *WebMaster) setRouter() {
 		// 统一设备管理（USB / Wi-Fi）：设备列表、事件日志、命名与连接控制
 		api.GET("/adb/devices", wm.handleADBDevices)
 		api.GET("/adb/events", wm.handleADBEvents)
+		api.POST("/adb/usb/rescan", wm.handleADBRescanUSB)
 		api.POST("/adb/device/name", wm.handleADBSetName)
 		api.POST("/adb/device/wifi", wm.handleADBAddWiFi)
 		api.POST("/adb/device/remove", wm.handleADBRemove)

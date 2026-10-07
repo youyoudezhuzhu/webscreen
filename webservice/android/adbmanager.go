@@ -631,6 +631,39 @@ func (m *Manager) Reconnect(serial string) error {
 	return err
 }
 
+// RescanUSB 重新走一遍 ADB 握手，用于「刷新并请求 USB 授权」：
+// 未授权设备只有在收到新的 ADB 握手时，手机侧 adbd 才会再次弹出
+// 「允许 USB 调试」对话框，因此这里先尝试 device 侧重连，再退回重启 adb server。
+func (m *Manager) RescanUSB() error {
+	m.mu.Lock()
+	m.addEventLocked("info", "正在刷新 USB 设备并重新请求调试授权…")
+	m.mu.Unlock()
+
+	// 温和路径：让已连接/离线设备重新握手
+	if _, err := runADB("reconnect", "device"); err != nil {
+		m.mu.Lock()
+		m.addEventLocked("warn", fmt.Sprintf("adb reconnect device 未生效：%v，改为重启 adb server", err))
+		m.mu.Unlock()
+	}
+	// 彻底路径：重启 adb server（USB 设备会被重新枚举并重新握手）
+	if _, err := runADB("kill-server"); err != nil {
+		m.mu.Lock()
+		m.addEventLocked("warn", fmt.Sprintf("adb kill-server 失败：%v", err))
+		m.mu.Unlock()
+	}
+	if _, err := runADB("start-server"); err != nil {
+		m.mu.Lock()
+		m.addEventLocked("error", fmt.Sprintf("adb start-server 失败：%v", err))
+		m.mu.Unlock()
+		return err
+	}
+	m.poll()
+	m.mu.Lock()
+	m.addEventLocked("info", "USB 设备已重新枚举，未授权设备请在手机屏幕上点击“允许 USB 调试”")
+	m.mu.Unlock()
+	return nil
+}
+
 // MarkStreaming 记录某台设备当前的投屏状态，供界面显示。
 func (m *Manager) MarkStreaming(serial string, streaming bool) {
 	m.mu.Lock()

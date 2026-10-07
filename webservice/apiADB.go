@@ -34,6 +34,17 @@ func (wm *WebMaster) handleADBEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"events": android.GetManager().Events(limit)})
 }
 
+// POST /api/adb/usb/rescan
+// 刷新 USB 设备并重新请求调试授权（未授权设备会重新弹出手机的授权对话框）。
+func (wm *WebMaster) handleADBRescanUSB(c *gin.Context) {
+	mgr := android.GetManager()
+	if err := mgr.RescanUSB(); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "devices": mgr.Snapshot()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "devices": mgr.Snapshot(), "events": mgr.Events(10)})
+}
+
 // POST /api/adb/device/name   {"serial": "...", "name": "我的平板"}
 func (wm *WebMaster) handleADBSetName(c *gin.Context) {
 	var req adbDeviceRequest

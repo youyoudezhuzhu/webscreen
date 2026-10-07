@@ -165,11 +165,7 @@ function renderDeviceList() {
                     <div class="col-span-full flex flex-col items-center justify-center py-20 text-gray-500 bg-[#1e1f20]/50 rounded-3xl border border-dashed border-gray-700">
                         <span class="material-symbols-rounded text-5xl mb-4 opacity-50">phonelink_off</span>
                         <p class="text-lg">${i18n.t('no_devices') || '没有设备'}</p>
-                        <div class="flex items-center gap-3 mt-4">
-                            <button onclick="openModal('connectModal')" class="text-[var(--md-sys-color-primary)] hover:underline">${i18n.t('connect_device')}</button>
-                            <span class="text-gray-600">·</span>
-                            <button onclick="addWirelessDevice()" class="text-[var(--md-sys-color-primary)] hover:underline">${i18n.t('add_wireless_device') || '添加无线设备'}</button>
-                        </div>
+                        <button onclick="openModal('connectModal')" class="mt-4 text-[var(--md-sys-color-primary)] hover:underline">${i18n.t('connect_device')}</button>
                     </div>
                 `;
         return;
@@ -334,28 +330,22 @@ function renderDeviceList() {
     });
 
     groups.forEach(group => {
-        // 无线分组即使为空也要显示，否则用户没有"添加无线设备"的入口
+        // 无线分组即使为空也显示，让用户知道这类设备的存在与接入方式
         const alwaysShow = group.key === 'wifi';
         if (!group.devices.length && !alwaysShow) return;
         const header = document.createElement('div');
         header.className = 'col-span-full flex items-center justify-between mt-2 mb-1 first:mt-0';
-        const addBtn = group.key === 'wifi'
-            ? `<button onclick="addWirelessDevice()" class="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#2a2b2c] hover:bg-[#333] text-[var(--md-sys-color-primary)] text-sm font-medium transition-colors">
-                   <span class="material-symbols-rounded text-lg">add</span>${i18n.t('add_wireless_device') || '添加无线设备'}
-               </button>`
-            : '';
         header.innerHTML = `
             <div class="flex items-center gap-2 text-gray-400">
                 <span class="material-symbols-rounded text-xl">${group.icon}</span>
                 <span class="text-sm font-medium tracking-wide">${group.title}</span>
                 <span class="text-xs px-2 py-0.5 rounded-full bg-[#2a2b2c]">${group.devices.length}</span>
-            </div>
-            ${addBtn}`;
+            </div>`;
         grid.appendChild(header);
         if (!group.devices.length) {
             const empty = document.createElement('div');
             empty.className = 'col-span-full text-xs text-gray-500 mb-3 px-1';
-            empty.textContent = i18n.t('no_wireless_devices') || '暂无无线设备：点击右上角「添加无线设备」，填手机的 无线调试 地址（ip:端口）即可接入。';
+            empty.textContent = i18n.t('no_wireless_devices') || '暂无无线设备：用上方「无线配对」配对，或用「连接设备」填写 ip:端口 接入。';
             grid.appendChild(empty);
             return;
         }
@@ -535,12 +525,11 @@ function openModal(id) {
     const dialog = document.getElementById(id);
     if (dialog) {
         dialog.showModal();
-        // dialog.addEventListener('click', (e) => {
-        //     const rect = dialog.getBoundingClientRect();
-        //     if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
-        //         closeModal(id);
-        //     }
-        // });
+        // 「连接设备」里带一个 USB 设备区块：打开时刷新一次并显示当前 USB 设备
+        if (id === 'connectModal' && typeof ensureUSBBlockInConnectModal === 'function') {
+            ensureUSBBlockInConnectModal();
+            loadUSBDevicesInModal();
+        }
     }
 }
 
@@ -949,6 +938,77 @@ async function addWirelessDevice() {
         showToast(e.message, 'error');
     }
     await refreshDevices();
+}
+
+// 「连接设备」弹窗里的 USB 设备区块：列出已接入设备，并可一键刷新 +
+// 重新请求调试授权（未授权设备会重新在手机上弹出授权对话框）。
+function ensureUSBBlockInConnectModal() {
+    const dialog = document.getElementById('connectModal');
+    if (!dialog || dialog.querySelector('#connectUSBSection')) return;
+    const panel = dialog.querySelector('.dialog-panel');
+    if (!panel) return;
+    const box = document.createElement('div');
+    box.id = 'connectUSBSection';
+    box.className = 'mt-6 pt-5 border-t border-[#333]';
+    box.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2 text-gray-300">
+                <span class="material-symbols-rounded text-lg">usb</span>
+                <span class="text-sm font-medium">${i18n.t('usb_devices')}</span>
+            </div>
+            <button id="usbRescanBtn" onclick="rescanUSBDevices()" class="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#2a2b2c] hover:bg-[#333] text-xs text-[var(--md-sys-color-primary)] transition-colors">
+                <span class="material-symbols-rounded text-base">refresh</span>${i18n.t('refresh_usb_auth') || '刷新并请求授权'}
+            </button>
+        </div>
+        <div id="usbDeviceList" class="text-xs text-gray-400 space-y-1 max-h-40 overflow-y-auto"></div>`;
+    const fields = panel.querySelector('.space-y-4');
+    if (fields) fields.insertAdjacentElement('afterend', box);
+    else panel.appendChild(box);
+}
+
+function renderUSBDeviceList(devices) {
+    const box = document.getElementById('usbDeviceList');
+    if (!box) return;
+    const usb = (devices || []).filter(d => String(d.transport || '').toUpperCase() === 'USB');
+    if (!usb.length) {
+        box.innerHTML = `<div class="py-1">${i18n.t('no_usb_devices') || '未检测到 USB 设备：请用数据线连接手机，并在手机上开启 USB 调试。'}</div>`;
+        return;
+    }
+    box.innerHTML = usb.map(d => {
+        const style = ADB_STATUS_STYLE[d.status] || { chip: 'bg-[#2a2b2c] text-gray-300', dot: 'bg-gray-400' };
+        return `<div class="flex items-center justify-between gap-2 py-1">
+            <span class="truncate text-gray-300">${d.name || d.auto_name || d.serial}</span>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] ${style.chip}"><span class="w-1.5 h-1.5 rounded-full ${style.dot}"></span>${adbStatusText(d.status)}</span>
+        </div>`;
+    }).join('');
+}
+
+async function loadUSBDevicesInModal() {
+    await loadADBDevices();
+    renderUSBDeviceList(Object.values(adbDeviceMap));
+}
+
+async function rescanUSBDevices() {
+    const btn = document.getElementById('usbRescanBtn');
+    if (btn) btn.disabled = true;
+    showToast(i18n.t('rescanning_usb') || '正在刷新 USB 设备并请求授权…');
+    try {
+        const res = await fetch('/api/adb/usb/rescan', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (Array.isArray(data.devices)) {
+            adbDeviceMap = {};
+            data.devices.forEach(d => { adbDeviceMap[d.serial] = d; });
+            renderUSBDeviceList(data.devices);
+            renderDeviceList();
+        }
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        showToast(i18n.t('rescan_done') || '已重新请求授权，请在手机上确认');
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+        loadADBEvents();
+    }
 }
 
 // 设备列表 + 事件日志一起刷新（页面不可见时不打扰）
