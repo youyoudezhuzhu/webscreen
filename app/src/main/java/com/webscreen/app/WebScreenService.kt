@@ -224,14 +224,44 @@ class WebScreenService : Service() {
 
     private fun startForegroundCompat() {
         val notification = buildNotification()
+
+        // Android 14+ 必须声明 foregroundServiceType；而 specialUse 在侧载应用上
+        // 会因缺少 Play 审核被 AppOps 直接拒绝（真机 Android 16 + targetSdk 34 实测：
+        // "AppOps: Operation not started ... op=START_FOREGROUND" → 进程被杀、反复重启）。
+        // 因此按"最可能被接受"的顺序依次尝试，任何一个成功即返回；
+        // 全部失败也不抛异常（否则就是用户看到的"点启动就闪退"），
+        // 降级为普通服务继续运行，并把真实原因写进界面日志。
+        val candidates = ArrayList<Int>()
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+            candidates.add(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            candidates.add(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        }
+        candidates.add(-1) // -1 = 不指定类型（老系统路径）
+
+        var lastError: Exception? = null
+        for (type in candidates) {
+            try {
+                if (type < 0) {
+                    startForeground(NOTIFICATION_ID, notification)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification, type)
+                }
+                if (type < 0) {
+                    ServerState.append("[app] 前台服务已启动（未指定类型）")
+                } else {
+                    ServerState.append("[app] 前台服务已启动（type=$type）")
+                }
+                return
+            } catch (e: Exception) {
+                lastError = e
+                ServerState.append("[app] 前台服务类型 $type 被拒绝: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+
+        // 全部失败：不抛异常，避免进程被系统判定为崩溃后反复重启
+        ServerState.append("[app] 警告：所有前台服务类型都被拒绝，降级为普通服务运行（后台可能被系统回收）")
+        if (lastError != null) {
+            ServerState.append("[app] 最后错误: ${lastError.javaClass.simpleName}: ${lastError.message}")
         }
     }
 
