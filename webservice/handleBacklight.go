@@ -43,12 +43,21 @@ const backlightOnScript = `
 set -e
 prev=/data/local/tmp/webscreen_backlight_prev
 if [ -s "$prev" ]; then
-  while read -r d cur max; do
+  # 每行格式： <目录> <原亮度> <最大亮度>；优先写回原亮度，缺失才用最大值。
+  # 注意用 set -- 显式取字段，避免 read 在字段数不符时把值错位。
+  while read -r line; do
+    set -- $line
+    d=$1; cur=${2:-}; max=${3:-}
     f="${d}brightness"
     [ -w "$f" ] || continue
     v=$cur
-    [ "$v" -gt 0 ] 2>/dev/null || v=$max
-    [ "$v" -gt 0 ] 2>/dev/null || v=255
+    case "$v" in ''|*[!0-9]*) v= ;;
+    esac
+    if [ -z "$v" ]; then
+      v=$max
+      case "$v" in ''|*[!0-9]*) v=255 ;;
+      esac
+    fi
     echo "$v" > "$f"
   done < "$prev"
   : > "$prev"

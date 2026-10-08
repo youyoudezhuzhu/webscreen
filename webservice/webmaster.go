@@ -59,6 +59,17 @@ func Default(staticFS fs.FS) *WebMaster {
 func (wm *WebMaster) setRouter() {
 	// gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	// 前端资源是 //go:embed 进二进制的：升级后浏览器若沿用缓存的旧 HTML/JS，
+	// 会出现"按钮在但点了没反应"（旧页面没有新脚本标签）这类极难排查的现象。
+	// 因此统一禁止缓存，保证升级后刷新即生效。
+	r.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	})
+
 	subFS, _ := fs.Sub(wm.staticFS, "static")
 	r.StaticFS("/static", http.FS(subFS))
 
