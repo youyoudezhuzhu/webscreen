@@ -38,13 +38,26 @@ class WebScreenService : Service() {
                 stopSelf()
             }
             else -> {
-                // 整个前台服务流程都兜住：任何异常都不允许逃出 onStartCommand，
-                // 否则用户看到的就是"点开启服务马上闪退"。
-                try {
-                    startForegroundCompat()
-                } catch (t: Throwable) {
-                    ServerState.append("[app] 前台服务启动异常（已忽略，降级运行）: ${t.javaClass.simpleName}: ${t.message}")
-                    Log.e(TAG, "startForegroundCompat failed, degrade to background service", t)
+                // Android 15+（SDK 35+）的部分 ROM 会拒绝前台服务：
+                // 实测一加 7 Pro（Android 16）上 startForeground 明明成功
+                // （日志 "[app] 前台服务已启动（type=2）"），系统仍在 ~96ms 后
+                // 以 "has died: prcp FGS" 杀掉整个进程，并伴随
+                // "ForegroundServiceTypeLoggerModule: Logger should be tracking
+                // FGS types correctly"。也就是说拒绝发生在 ROM 的 FGS 校验层，
+                // 与我们声明哪种类型无关 —— 换类型无效。
+                //
+                // 因此在这些系统上干脆不提升前台服务，只跑普通服务。
+                // webscreen 二进制是以 exec 启动的独立进程，服务随后被回收
+                // 也不会中断串流；而普通服务不触发 FGS 校验，进程不会被杀。
+                if (Build.VERSION.SDK_INT >= 35) {
+                    ServerState.append("[app] Android 15+：跳过前台服务提升，改用普通服务（规避 ROM 的 FGS 校验）")
+                } else {
+                    try {
+                        startForegroundCompat()
+                    } catch (t: Throwable) {
+                        ServerState.append("[app] 前台服务启动异常（已忽略，降级运行）: ${t.javaClass.simpleName}: ${t.message}")
+                        Log.e(TAG, "startForegroundCompat failed, degrade to background service", t)
+                    }
                 }
                 try {
                     startServer()
@@ -311,24 +324,26 @@ class WebScreenService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, WebScreenService::class.java).setAction(ACTION_START)
-            // startForegroundService 若在 5 秒内没能 startForeground，系统会直接杀掉进程。
-            // 某些 ROM（例如 Android 16 上的一加 7 Pro 实测）会拒绝 FGS 启动，
-            // 导致"点开启服务就闪退"。这里失败后立刻退回普通 startService：
-            // 服务至少能跑起来并把 webscreen 二进制拉起来（native 进程独立存活）。
+            // 优先用普通 startService：
+            // Android 15+ 的部分 ROM 即使 startForeground 成功也会杀掉 FGS 进程
+            // （见 onStartCommand 的说明），而 startForegroundService 还额外要求
+            // 5 秒内完成 startForeground，失败即杀。普通服务两者都不触发。
+            // 用户是在前台点按钮，因此 startService 不会被后台限制拒绝。
+            try {
+                context.startService(intent)
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "startService 失败，退回 startForegroundService", e)
+            }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
                 } else {
                     context.startService(intent)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "startForegroundService 失败，退回 startService", e)
-                try {
-                    context.startService(intent)
-                } catch (e2: Exception) {
-                    Log.e(TAG, "startService 也失败", e2)
-                    ServerState.append("[app] 启动服务失败: ${e2.javaClass.simpleName}: ${e2.message}")
-                }
+            } catch (e2: Exception) {
+                Log.e(TAG, "两种方式都无法启动服务", e2)
+                ServerState.append("[app] 启动服务失败: ${e2.javaClass.simpleName}: ${e2.message}")
             }
         }
 
