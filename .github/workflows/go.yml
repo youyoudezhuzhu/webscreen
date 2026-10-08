@@ -59,32 +59,10 @@ jobs:
         name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
         path: dist/
 
-  release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: build # 必须等所有 build 任务都成功才执行
-    # 仅在 Tag 推送时运行此步骤
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    steps:
-    - name: Download All Artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./assets
-        # 不指定 name 则下载所有 artifacts
-        merge-multiple: true 
-
-    - name: Display Downloaded Files
-      run: ls -R ./assets
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        # 将下载的所有二进制文件上传到 Release
-        files: assets/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # 说明：这里原本还有一个 `release` job，会把 7 个平台的二进制（linux/windows/darwin
+  # 的 amd64+arm64 与 android-arm64）全部上传到 Release。Release 页面现在只保留两个
+  # 文件 —— fnOS 的 `.fpk`（装在 NAS）与 Android 的 `.apk`（装在已 root 的手机）——
+  # 它们由发布流程单独上传。多平台二进制仍可在本 workflow 的 Artifacts 中下载。
 
   docker:
     name: Build and Push Docker Image
