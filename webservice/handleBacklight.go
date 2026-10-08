@@ -82,6 +82,7 @@ func runDeviceShell(serial, script string) (string, error) {
 	wrapped := fmt.Sprintf("echo %s | base64 -d | sh", encoded)
 
 	if strings.TrimSpace(serial) == "" {
+		// 本机（APK 内嵌模式）：exec 直接传参，不经 shell 拼接，无需引号
 		cmd := exec.CommandContext(ctx, "/system/bin/su", "-c", wrapped)
 		out, err := cmd.CombinedOutput()
 		return string(out), err
@@ -91,7 +92,14 @@ func runDeviceShell(serial, script string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, adbPath, "-s", serial, "shell", "su", "-c", wrapped)
+	// 关键：`adb shell` 会把它收到的参数用空格拼成一条远程命令。
+	// 若直接传 "su", "-c", wrapped，远程实际执行的是
+	//   su -c echo <b64> | base64 -d | sh
+	// —— 管道被外层 shell 截获，su 只拿到 "echo"，脚本在本地乱跑，
+	// 远端背光不变而退出码仍为 0（真机实测：API 返回 success 但 brightness 没变）。
+	// 因此必须把 "su -c '<script>'" 作为**单个参数**交给 adb。
+	quoted := "'" + strings.ReplaceAll(wrapped, "'", `'\''`) + "'"
+	cmd := exec.CommandContext(ctx, adbPath, "-s", serial, "shell", "su -c "+quoted)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
