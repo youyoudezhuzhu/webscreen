@@ -8,10 +8,6 @@ Self-hosted screen streaming in the browser: view and control an Android phone's
 
 ---
 
-## ⚠️ Which file should I download? (pick ONE, **do not install both**)
-
-This repository ships **two mutually exclusive** packages. They are two ways to deploy the *same* server — **you only install one of them**.
-
 | Your setup | Download | Install on | What the phone needs |
 |---|---|---|---|
 | **fnOS (飞牛) NAS** as the server | `webscreen_<version>.fpk` | **NAS only** | **Nothing to install** — just enable USB / wireless debugging and authorize |
@@ -38,7 +34,7 @@ rooted phone → install APK → grant root → tap Start
 - Requires: arm64, Android 8+, root
 - Full instructions (and limitations): [`doc/android-apk.md`](doc/android-apk.md)
 
-> **Do not install both.** Both options give you the same thing: a web page that shows and controls the phone.
+> **No need to install both files** — both options give you the same thing: a web page that shows and controls the phone.
 
 ---
 
