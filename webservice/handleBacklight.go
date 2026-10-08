@@ -2,6 +2,8 @@ package webservice
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"log"
 	"net/http"
 	"os/exec"
@@ -22,6 +24,7 @@ import (
 // 关闭前会记录每个背光节点的原值与 max，恢复到文件里；恢复优先写回原值，
 // 原值不可用时退回 max_brightness。
 const backlightOffScript = `
+set -e
 prev=/data/local/tmp/webscreen_backlight_prev
 : > "$prev"
 for d in /sys/class/backlight/*/; do
@@ -33,9 +36,11 @@ for d in /sys/class/backlight/*/; do
   echo "$d $cur $max" >> "$prev"
   echo 0 > "$f"
 done
+echo WEBSREEN_BACKLIGHT_OK
 `
 
 const backlightOnScript = `
+set -e
 prev=/data/local/tmp/webscreen_backlight_prev
 if [ -s "$prev" ]; then
   while read -r d cur max; do
@@ -55,6 +60,7 @@ else
     [ "$max" -gt 0 ] 2>/dev/null && echo "$max" > "$f"
   done
 fi
+echo WEBSREEN_BACKLIGHT_OK
 `
 
 type backlightRequest struct {
@@ -69,8 +75,14 @@ func runDeviceShell(serial, script string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
+	// 脚本用 base64 传输：`adb shell su -c "<script>"` 会把参数按空格重新拼接，
+	// 多行脚本的换行与引号会被破坏（真机实测：命令返回 0 但背光没变），
+	// 因此统一编码后由远端 shell 解码执行。
+	encoded := base64.StdEncoding.EncodeToString([]byte(script))
+	wrapped := fmt.Sprintf("echo %s | base64 -d | sh", encoded)
+
 	if strings.TrimSpace(serial) == "" {
-		cmd := exec.CommandContext(ctx, "/system/bin/su", "-c", script)
+		cmd := exec.CommandContext(ctx, "/system/bin/su", "-c", wrapped)
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
@@ -79,7 +91,7 @@ func runDeviceShell(serial, script string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, adbPath, "-s", serial, "shell", "su", "-c", script)
+	cmd := exec.CommandContext(ctx, adbPath, "-s", serial, "shell", "su", "-c", wrapped)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -97,9 +109,14 @@ func (wm *WebMaster) handleBacklight(c *gin.Context) {
 	}
 
 	out, err := runDeviceShell(req.Serial, script)
-	if err != nil {
-		log.Printf("[backlight] failed serial=%q off=%v: %v (%s)", req.Serial, *req.Off, err, strings.TrimSpace(out))
-		c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": strings.TrimSpace(out + " " + err.Error())})
+	trimmed := strings.TrimSpace(out)
+	if err != nil || !strings.Contains(trimmed, "WEBSREEN_BACKLIGHT_OK") {
+		msg := trimmed
+		if err != nil {
+			msg = trimmed + " " + err.Error()
+		}
+		log.Printf("[backlight] failed serial=%q off=%v: %s", req.Serial, *req.Off, msg)
+		c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": msg})
 		return
 	}
 	log.Printf("[backlight] serial=%q off=%v ok", req.Serial, *req.Off)
