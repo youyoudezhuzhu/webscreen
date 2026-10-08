@@ -12,6 +12,9 @@
     <script src="/static/connect.js" defer></script>
     <script src="/static/fullscreen.js" defer></script>
     <script src="/static/screen.js" defer></script>
+    <!-- 黑屏（隐私保护）：静态加载，不依赖 WebRTC 能力协商 ——
+         挂在 updateUIBasedOnCapabilities 里时，若该回调未触发按钮就是死的 -->
+    <script src="/static/capabilities/backlight.js" defer></script>
     <!-- <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="/static/video_translate.js" defer></script> -->
 </head>
