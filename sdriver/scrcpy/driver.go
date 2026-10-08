@@ -173,6 +173,28 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 			return nil, err
 		}
 	}
+	// 失败时必须收尾：listener 不关会让 tcp 端口 / 抽象 socket 一直被占，
+	// reverse 隧道与已建立的连接也会残留下来，下一次会话就会撞端口或连到残留的
+	// server，在读取设备元数据时再次拿到 EOF —— 这正是用户偶尔看到的
+	// "服务器错误: failed to ensure agent: EOF" 的来源。
+	// 注意 New() 原有的失败分支只处理了 Accept 失败；readDeviceMeta 失败那条
+	// 路径此前是直接 return 的，漏掉了全部清理。
+	setupOK := false
+	defer func() {
+		if setupOK {
+			return
+		}
+		if listener != nil {
+			listener.Close()
+		}
+		for _, c := range []net.Conn{da.videoConn, da.audioConn, da.controlConn} {
+			if c != nil {
+				c.Close()
+			}
+		}
+		da.cleanupTunnel()
+	}()
+
 	// da.adbClient.cancel()
 	log.Printf("[scrcpy] driver config: %v", config)
 	video_codec_options := ""
@@ -452,6 +474,7 @@ func New(config map[string]string) (*ScrcpyDriver, error) {
 	// da.videoConn.(*net.TCPConn).SetReadBuffer(2 * 1024 * 1024)
 	// da.audioConn.(*net.TCPConn).SetReadBuffer(64 * 1024)
 
+	setupOK = true
 	return da, nil
 }
 

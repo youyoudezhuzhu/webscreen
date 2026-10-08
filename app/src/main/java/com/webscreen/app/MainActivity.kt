@@ -164,6 +164,8 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private var lastStateProbeAt = 0L
+
     private val tick = object : Runnable {
         override fun run() {
             renderServer()
@@ -172,6 +174,26 @@ class MainActivity : Activity() {
             // the request in Magisk/KernelSU the start button becomes usable.
             if (!rootGranted) {
                 checkRoot()
+            }
+            // ServerState.running 只是本进程内的缓存标记：服务进程可能被杀，
+            // 也可能由别的途径（开机自启、上一次运行的残留）启动，界面就会一直
+            // 停在错误的状态上，用户得手动“停止→启动”才能恢复。这里定期拿真实
+            // 进程校正一次，界面状态不再需要人工纠正。
+            val now = System.currentTimeMillis()
+            if (now - lastStateProbeAt >= 2000) {
+                lastStateProbeAt = now
+                Thread {
+                    val pid = ServerState.runningPid()
+                    val actuallyRunning = pid != 0
+                    if (actuallyRunning != ServerState.running) {
+                        ServerState.setRunning(actuallyRunning)
+                        ServerState.append(
+                            if (actuallyRunning) "[app] 检测到 webscreen 进程 (pid=$pid)，界面状态已同步"
+                            else "[app] webscreen 进程已退出，界面状态已同步"
+                        )
+                    }
+                    handler.post { renderServer() }
+                }.start()
             }
             handler.postDelayed(this, 1000)
         }
