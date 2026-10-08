@@ -81,8 +81,13 @@ func runDeviceShell(serial, script string) (string, error) {
 	encoded := base64.StdEncoding.EncodeToString([]byte(script))
 	wrapped := fmt.Sprintf("echo %s | base64 -d | sh", encoded)
 
-	if strings.TrimSpace(serial) == "" {
-		// 本机（APK 内嵌模式）：exec 直接传参，不经 shell 拼接，无需引号
+	// 本机模式（APK 内嵌：服务就跑在被控设备上）时必须直接在本机执行 ——
+	// 此时设备没有 adb 也不需要 adb。注意不能只看 serial 是否为空：
+	// 前端从 URL 拿到的是设备 id（例如 /screen/10fda345），本机模式下这个 id
+	// 并不是可用的 adb 串号，走 adb 分支会失败（真机实测报错
+	// "webscreen is running on the device itself (root mode), adb is neither
+	// available nor required"）。exec 直接传参，不经 shell 拼接，无需引号。
+	if strings.TrimSpace(serial) == "" || utils.IsLocalRootMode() {
 		cmd := exec.CommandContext(ctx, "/system/bin/su", "-c", wrapped)
 		out, err := cmd.CombinedOutput()
 		return string(out), err
