@@ -77,10 +77,45 @@ type backlightRequest struct {
 	Off    *bool  `json:"off"`
 }
 
+// normalizeSerial 把 webscreen/scrcpy 风格的设备 ID 还原成 adb 能识别的裸串号。
+//
+// 串流页面 URL 里的设备 ID 可能是 scrcpy 的三段式：
+//
+//	<adbSerial>_<usbIndex>_<transportId>   例如 10fda345_0_0
+//
+// 而 `adb -s` 只认裸串号（10fda345），直接透传会得到
+// "adb: device '10fda345_0_0' not found" —— 这正是用户在页面上点击黑屏按钮时的报错。
+// 仅当末两段都是纯数字时才剥离，避免误伤串号里本来就含下划线的机型。
+func normalizeSerial(id string) string {
+	parts := strings.Split(id, "_")
+	if len(parts) >= 3 {
+		last, prev := parts[len(parts)-1], parts[len(parts)-2]
+		if isAllDigits(last) && isAllDigits(prev) {
+			return strings.Join(parts[:len(parts)-2], "_")
+		}
+	}
+	return id
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // runDeviceShell 在受控设备上以 root 执行一段 shell：
 //   - serial 非空 → 通过 adb（NAS 托管模式，webscreen 跑在 NAS 上）
 //   - serial 为空 → 直接在本机执行（APK 内嵌模式，服务就跑在手机里）
 func runDeviceShell(serial, script string) (string, error) {
+	// adb 只认裸串号：页面传来的可能是 scrcpy 风格的三段式设备 ID，先归一化。
+	serial = normalizeSerial(strings.TrimSpace(serial))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
