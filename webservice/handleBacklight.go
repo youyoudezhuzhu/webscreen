@@ -77,45 +77,81 @@ type backlightRequest struct {
 	Off    *bool  `json:"off"`
 }
 
-// normalizeSerial 把 webscreen/scrcpy 风格的设备 ID 还原成 adb 能识别的裸串号。
+// resolveSerial 把页面传来的设备标识解析成 adb 能识别的裸串号。
 //
-// 串流页面 URL 里的设备 ID 可能是 scrcpy 的三段式：
+// 串流页面 URL 里的设备 ID 形态并不统一（实测遇到过三种）：
 //
-//	<adbSerial>_<usbIndex>_<transportId>   例如 10fda345_0_0
+//	10fda345                 纯 adb 串号
+//	10fda345_0_0             scrcpy 三段式 <serial>_<usbIndex>_<transportId>
+//	android_10fda345         <deviceType>_<serial>
 //
-// 而 `adb -s` 只认裸串号（10fda345），直接透传会得到
-// "adb: device '10fda345_0_0' not found" —— 这正是用户在页面上点击黑屏按钮时的报错。
-// 仅当末两段都是纯数字时才剥离，避免误伤串号里本来就含下划线的机型。
-func normalizeSerial(id string) string {
-	parts := strings.Split(id, "_")
-	if len(parts) >= 3 {
-		last, prev := parts[len(parts)-1], parts[len(parts)-2]
-		if isAllDigits(last) && isAllDigits(prev) {
-			return strings.Join(parts[:len(parts)-2], "_")
+// 逐个穷举格式既脆弱又容易漏（修了 `_0_0` 又蹦出 `android_` 前缀），
+// 因此改为拿 `adb devices` 的在线列表做匹配，顺序：
+//  1. 原样命中
+//  2. 按 "_" 分段，任一段命中某个在线串号
+//  3. 整体包含某个在线串号
+//  4. 只在线一台设备时直接用它
+//
+// 全部失败时返回错误并列出在线串号，便于一眼看出问题。
+func resolveSerial(adbPath, id string) (string, error) {
+	id = strings.TrimSpace(id)
+	online := listADBSerials(adbPath)
+
+	if len(online) == 0 {
+		return "", fmt.Errorf("no adb device online")
+	}
+	for _, s := range online {
+		if s == id {
+			return s, nil
 		}
 	}
-	return id
+	for _, part := range strings.Split(id, "_") {
+		if part == "" {
+			continue
+		}
+		for _, s := range online {
+			if part == s {
+				return s, nil
+			}
+		}
+	}
+	if id != "" {
+		for _, s := range online {
+			if s != "" && strings.Contains(id, s) {
+				return s, nil
+			}
+		}
+	}
+	if len(online) == 1 {
+		return online[0], nil
+	}
+	return "", fmt.Errorf("cannot resolve device id %q to an adb serial; online: %s",
+		id, strings.Join(online, ", "))
 }
 
-func isAllDigits(s string) bool {
-	if s == "" {
-		return false
+// listADBSerials 返回当前处于 device 状态（已授权、在线）的 adb 设备串号。
+func listADBSerials(adbPath string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, adbPath, "devices").Output()
+	if err != nil {
+		return nil
 	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
+	var serials []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "device" {
+			serials = append(serials, fields[0])
 		}
 	}
-	return true
+	return serials
 }
 
 // runDeviceShell 在受控设备上以 root 执行一段 shell：
 //   - serial 非空 → 通过 adb（NAS 托管模式，webscreen 跑在 NAS 上）
 //   - serial 为空 → 直接在本机执行（APK 内嵌模式，服务就跑在手机里）
 func runDeviceShell(serial, script string) (string, error) {
-	// adb 只认裸串号：页面传来的可能是 scrcpy 风格的三段式设备 ID，先归一化。
-	serial = normalizeSerial(strings.TrimSpace(serial))
-
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -138,6 +174,12 @@ func runDeviceShell(serial, script string) (string, error) {
 	}
 
 	adbPath, err := utils.GetADBPath()
+	if err != nil {
+		return "", err
+	}
+	// 页面传来的标识不一定是裸串号（可能是 android_<serial> 或 <serial>_0_0），
+	// 用在线设备列表解析出真正的串号，否则 `adb -s <id>` 会报 device not found。
+	serial, err = resolveSerial(adbPath, serial)
 	if err != nil {
 		return "", err
 	}
