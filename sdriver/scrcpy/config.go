@@ -11,11 +11,16 @@ const (
 	// SCRCPY_SERVER_LOCAL_PATH  = "/tmp/scrcpy-server"
 	SCRCPY_SERVER_ANDROID_DST = "/data/local/tmp/scrcpy-server"
 	SCRCPY_PROXY_PORT_DEFAULT = "27183"
-	SCRCPY_VERSION            = "4.1"
-	SCRCPY_EMBED_PATH         = "bin/scrcpy-server-v4.1"
+	// ⚠️ scrcpy server 会强制校验客户端版本（server 端 Options.java 里比对
+	// BuildConfig.VERSION_NAME），本常量必须与内嵌 jar 的版本**精确一致**，
+	// 否则 server 会以 "The server version (X) does not match the client (Y)"
+	// 直接拒绝启动 —— 表现为所有串流全部失败。换 jar 时务必同步修改此处与
+	// SCRCPY_EMBED_PATH（含下面的 //go:embed 路径）。
+	SCRCPY_VERSION            = "5.0.1"
+	SCRCPY_EMBED_PATH         = "bin/scrcpy-server-v5.0.1"
 )
 
-//go:embed bin/scrcpy-server-v4.1
+//go:embed bin/scrcpy-server-v5.0.1
 var scrcpyServerData embed.FS
 
 // Receive an optional params
