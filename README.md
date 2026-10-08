@@ -1,188 +1,77 @@
 # Webscreen
 
-[简体中文](README.zh.md)
-[日本語](README.ja.md)
+[简体中文](README.zh.md) | [日本語](README.ja.md)
 
-## ℹ️ About
+Self-hosted screen streaming in the browser: view and control an Android phone's screen from a web page. Android support is based on [scrcpy](https://github.com/Genymobile/scrcpy).
 
-[Watch Demo](https://youtu.be/6WtbwaIk2aY)
-
-Webscreen is a self-hosted screen streaming web application for Android and Linux devices, based on WebRTC. Might support more devices in the future!
 ![screenshot](doc/assets/screenshot.png)
 
-It can run on:
+---
 
-- Android Termux
-- Linux
-- Windows
-- MacOS
+## ⚠️ Which file should I download? (pick ONE, **do not install both**)
 
-on both `amd64` and `arm64`
+This repository ships **two mutually exclusive** packages. They are two ways to deploy the *same* server — **you only install one of them**.
 
-Android supports ([scrcpy](https://github.com/Genymobile/scrcpy)):
+| Your setup | Download | Install on | What the phone needs |
+|---|---|---|---|
+| **fnOS (飞牛) NAS** as the server | `webscreen_<version>.fpk` | **NAS only** | **Nothing to install** — just enable USB / wireless debugging and authorize |
+| **Rooted Android phone**, no NAS | `WebScreen-<version>.apk` | **Phone only** | No NAS, no adb, no Termux, no PC |
 
-- Video, Audio, Control
-- UHID Devices (Mouse, Keyboard, Gamepad)
-- Clipboard Sync
-- Touch (Multi-finger, pressure)
-- H.264/H.265
-- Multi-Connection
-- Maybe more...
+### Option A: fnOS NAS — install the `.fpk`
 
-Linux supports (Xvfb/Xorg/Sway):
-- Video, Control
-- Touch
-- H.264/H.265
-- GPU (Xorg/Sway)
+The NAS becomes the webscreen server and drives the phone over **USB ADB** or **Wi-Fi ADB**.
 
-## Prerequisites
+- The phone side needs **no app at all** — just enable USB debugging (or wireless debugging) in Developer Options and authorize the connection
+- Open `http://<NAS-IP>:8079` in any browser on your LAN to manage devices
+- Multiple devices, USB hot-plug, per-device custom names
+- Install / upgrade / ports / known limitations: [`doc/fnos-fpk.md`](doc/fnos-fpk.md)
 
-For device side, please refer to [scrcpy](https://github.com/Genymobile/scrcpy/blob/master/README.md#prerequisites)
+### Option B: Rooted Android phone — install the `.apk`
 
-For server side, you'd better have `adb` and `xvfb, ffmpeg, xfce4, sway, wf-recorder (if need this feature, optional)` in your PATH first.
+The phone runs webscreen on itself and streams its own screen. **No PC and no NAS involved.**
+
+```
+rooted phone → install APK → grant root → tap Start
+             → open http://<phone-IP>:8079 in a browser on the same LAN
+```
+
+- Requires: arm64, Android 8+, root
+- Full instructions (and limitations): [`doc/android-apk.md`](doc/android-apk.md)
+
+> **Do not install both.** Both options give you the same thing: a web page that shows and controls the phone.
+
+---
+
+## Features
+
+Android (via [scrcpy](https://github.com/Genymobile/scrcpy)):
+
+- Video / audio / control
+- UHID virtual devices: mouse, keyboard, gamepad
+- Clipboard sync
+- Multi-touch with pressure
+- H.264 / H.265
+- Multiple simultaneous connections
+- **Controlled-side blackout**: the screen goes dark but **stays unlocked** — streaming and touch keep working (for privacy)
+
+Linux (Xvfb / Xorg / Sway): video, control, touch, H.264/H.265, GPU (Xorg/Sway)
+
+## Other platforms (upstream usage)
+
+The same code also runs on Termux, Linux, Windows and macOS (amd64 / arm64), or via Docker:
 
 ```bash
-# Build by yourself:
-git clone https://github.com/huonwe/webscreen.git
-cd webscreen
-make
-
-# Use pre-built binary:
-apt install adb
-# if you want to stream Linux display
-apt install xvfb ffmpeg xfce4 sway wf-recorder
-# then you can directly use pre-built binary
+wget https://raw.githubusercontent.com/youyoudezhuzhu/webscreen/refs/heads/main/docker-compose.yml
+docker compose up -d
 ```
 
-**for client side, you need a web browser that support WebRTC (H.264 High Profile, or H.265 Main Profile).**
-
-## Usage
-
-Download the latest [release](https://github.com/huonwe/webscreen/releases), execute the program. The default port is `8079`, but you can specifiy it by `-port 8080`. 6-digit PIN is also needed (default to no password). An example command: `./webscreen -host 0.0.0.0 -port 8080 -pin 555555`
-Then open your favorite browser and visit `<your ip>:<your port>`
-
-Or you can build by yourself. Normally, you can build simply by `go build`. But if you want to build by yourself on `Termux`, you need to run `go build -ldflags "-checklinkname=0"`.
-
-You can also use docker.
-
-For lite version:
-
-```yaml
-services:
-  webscreen:
-    image: dukihiroi/webscreen:latest
-    container_name: webscreen
-    network_mode: host
-    # If you want to use bridge network:
-    # You need to ensure that your device is accessible from the container
-    # You also need to forward the necessary UDP traffic. If you face problems on it, please use host network mode.
-    # ports:
-    #   - "8079:8079"
-    #   - "51200-51299:51200-51299/udp"
-    restart: unless-stopped
-    volumes:
-      - /dev/bus/usb:/dev/bus/usb
-    privileged: true
-    environment:
-      - GIN_MODE=release
-      - PORT=8081
-      - PIN=123456
-```
-
-For full version which including Linux desktop environment:
-`cp .env.sample .env`
-
-```yaml
-services:
-  webscreen-full:
-    user: appuser
-    image: dukihiroi/webscreen-full:latest
-    container_name: webscreen-full
-    network_mode: host
-    restart: unless-stopped
-    volumes:
-      - /dev/bus/usb:/dev/bus/usb
-      - /dev/input:/dev/input
-      - /run/udev:/run/udev:ro
-    devices:
-      - /dev/uinput:/dev/uinput
-      - /dev/dri:/dev/dri
-    group_add:
-      - ${UINPUT_GID}
-    privileged: true
-    environment:
-      - GIN_MODE=release
-      - PORT=8081
-      - PIN=123456
-```
-
-`host` network mode is recommended because of UDP traffic and device connection.
-
-You might need to pair Android device in [wireless debug](https://developer.android.com/studio/debug/dev-options#enable) first. `Pair device with pairing code` is supported. Once you finished pairing, type `Connect` button and enter necessary information.
-
-After you start streaming, you might need to manually make the scene a little changed, to get the screen. You can simply click volume button to make it.
-
-### Others
-
-[Quick Start with Redroid](https://github.com/huonwe/webscreen/blob/main/doc/quick-start-redroid.md)
+Default port is `8079` (`-port 8080` to change), optional 6-digit PIN (`-pin 555555`, empty by default).
+The client needs a browser supporting WebRTC (H.264 High Profile, or H.265 Main Profile).
 
 ## FAQ
 
-- Crash: MediaCodec 0x80001001 Exception on custom Android devices due to hardcoded H.264 High Profile (profile=8) [#11](https://github.com/huonwe/webscreen/issues/11)
-  - set **profile=1** to **video_codec_options**
-
-## Android APK (rooted device, no adb, no Termux)
-
-This fork can also be built as an Android APK that runs webscreen **on the phone
-itself**, so a rooted device can stream its own screen to a browser without adb,
-Termux or any PC side helper:
-
-```
-rooted Android phone → install WebScreen.apk → grant root → Start
-                     → webscreen listens on 0.0.0.0:8079
-PC browser → http://<phone-ip>:8079
-```
-
-How it works: with `-local-root`, webscreen stores the embedded scrcpy-server in
-`/data/local/tmp/webscreen/`, starts it locally with
-`app_process64 ... tunnel_forward=true send_dummy_byte=false`, and connects to the
-`scrcpy_<scid>` abstract socket itself. WebRTC, audio, input, clipboard, PIN auth
-and the web UI are untouched.
-
-Build it in the cloud: **Actions → Build APK → Run workflow**, then download
-`WebScreen-debug.apk` from the run's artifacts. See
-[doc/android-apk.md](doc/android-apk.md) for the full instructions, requirements
-(root, arm64, Android 8+) and known limitations.
-
-## fnOS (飞牛 OS) native package
-
-WebScreen 也能作为飞牛 OS 原生 `.fpk` 运行：**NAS 本身就是 WebScreen 服务端**，通过
-**USB 有线 ADB** 或 **Wi-Fi ADB** 管理多台 Android 设备 —— 不需要 PC、不需要 Termux、
-不需要手敲 adb 命令。设备列表区分 USB 与无线、显示授权状态（手机等待「允许 USB 调试」
-时会明确提示）、记住用户自定义设备名、支持 USB 热插拔与多设备并存。
-
-- 安装 / 升级 / 端口 / USB 权限处理 / 已知限制：见 [`doc/fnos-fpk.md`](doc/fnos-fpk.md)
-- 云编译：GitHub Actions → **Build fnOS FPK** → artifact `WebScreen-fpk`
-- 桌面入口「WebScreen 控制台」→ `http://<NAS>:8079/console`
-
-## [For Developers](doc/dev)
+- **MediaCodec 0x80001001 crash on custom Android devices** (hardcoded H.264 High Profile): set `video_codec_options` to `profile=1`
 
 ## License
 
-```LICENSE
-Webscreen, streaming your device in Web browser.
-Copyright (C) 2026  Hiroi
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-```
+AGPL-3.0 — see [LICENSE](LICENSE).

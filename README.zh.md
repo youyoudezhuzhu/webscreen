@@ -1,104 +1,77 @@
 # Webscreen
 
-## ℹ️ 关于
+[English](README.md) | [日本語](README.ja.md)
 
-[观看演示](https://youtu.be/6WtbwaIk2aY)
+基于 WebRTC 的自托管屏幕串流：在浏览器里查看并操控 Android 手机画面。Android 侧基于 [scrcpy](https://github.com/Genymobile/scrcpy)。
 
-Webscreen 是一个基于 WebRTC 的自托管屏幕流式传输 Web 应用程序，适用于 Android 和 Linux 设备。
 ![screenshot](doc/assets/screenshot.png)
 
-它可以在以下平台上运行：
+---
 
-- Android Termux
-- Linux
-- Windows
-- MacOS
+## ⚠️ 该下载哪个文件？（二选一，**不是两个都装**）
 
-支持 `amd64` 和 `arm64` 架构。
+本仓库提供两个**互斥**的安装包 —— 它们是同一套服务的两种部署方式，**只需安装其中一个**。
 
-Android 支持 ([scrcpy](https://github.com/Genymobile/scrcpy))：
+| 你的情况 | 下载这个 | 装在哪里 | 手机端需要做什么 |
+|---|---|---|---|
+| 有**飞牛 NAS（fnOS）**，想让 NAS 管理手机 | `webscreen_<版本>.fpk` | **只装 NAS** | **不用装任何软件**，只需打开 USB 调试或无线调试并授权 |
+| 手机已 **root**，没有 NAS / 不想用 NAS | `WebScreen-<版本>.apk` | **只装手机** | 不用 NAS、不用 adb、不用 Termux、不用电脑 |
 
-- 视频、音频、控制
-- UHID 设备（鼠标、键盘、手柄）
-- 剪贴板同步
-- 多指触控、压力感应
-- H.264/H.265
-- 多连接
-- 可能更多...
+### 方案 A：飞牛 NAS —— 安装 `.fpk`
 
-Linux 支持 (xvfb)：
+NAS 装上后就是 WebScreen 服务端，通过 **USB 有线 ADB** 或 **Wi-Fi ADB** 连接手机。
 
-- 视频、控制
+- 手机端**不需要安装任何 App**，只需在开发者选项里打开 USB 调试（或无线调试）并允许授权
+- 局域网内任意浏览器访问 `http://<NAS 的 IP>:8079`，进入控制台管理设备
+- 支持多台设备同时连接、USB 热插拔、设备自定义命名
+- 安装 / 升级 / 端口 / 已知限制：[`doc/fnos-fpk.md`](doc/fnos-fpk.md)
 
-## 前提条件
+### 方案 B：已 root 的 Android 手机 —— 安装 `.apk`
 
-对于设备端，请参考 [scrcpy](https://github.com/Genymobile/scrcpy/blob/master/README.md#prerequisites)
+手机自己既是服务端也是被控端，**完全不依赖电脑和 NAS**。
 
-对于服务端，最好先确保 PATH 中包含 `adb` 以及 `xvfb, ffmpeg, xfce4 (如果需要此功能，可选)`。
-
-```bash
-# Termux
-pkg install android-tools
-# 克隆仓库并构建
-git clone https://github.com/huonwe/webscreen.git
-cd webscreen
-go build -o sdriver/xvfb/bin/capturer_xvfb ./capturer
-go build -ldflags "-checklinkname=0"
-
-# Debian
-apt install adb
-# 如果你想流式传输 xvfb 显示
-apt install xvfb ffmpeg xfce4
-# 然后你可以直接使用预构建的二进制文件
+```
+已 root 手机 → 安装 APK → 授予 root → 点「启动」
+             → 局域网浏览器访问 http://<手机 IP>:8079
 ```
 
-**对于客户端，你需要一个支持 WebRTC (H.264 High Profile, 或 H.265 Main Profile) 的 Web 浏览器。**
+- 要求：arm64、Android 8+、已 root
+- 完整说明（含功能限制）：[`doc/android-apk.md`](doc/android-apk.md)
 
-## 使用方法
+> **不要两个都装。** 两种方案得到的是同一个东西：一个在浏览器里操作手机画面的页面。
 
-下载最新的 [发布版本](https://github.com/huonwe/webscreen/releases)，执行程序。默认端口是 `8079`，但你可以通过 `-port 8080` 指定。还需要 6 位 PIN 码（默认为 无）。命令示例：`./webscreen -port 8080 -pin 555555`
-然后打开你喜欢的浏览器并访问 `<你的 ip>:<你的端口>`
+---
 
-或者你可以自己构建。通常，你只需运行 `go build` 即可构建。但如果你想在 `Termux` 上自己构建，你需要运行 `go build -ldflags "-checklinkname=0"`。
+## 功能
 
-你也可以使用 docker：
+Android（基于 [scrcpy](https://github.com/Genymobile/scrcpy)）：
+
+- 视频 / 音频 / 控制
+- UHID 虚拟设备：鼠标、键盘、手柄
+- 剪贴板同步
+- 多指触控（带压力感应）
+- H.264 / H.265
+- 多路连接
+- **受控端黑屏**：屏幕熄灭但**不锁屏**，串流与触控照常 —— 用于隐私场景
+
+Linux（Xvfb / Xorg / Sway）：视频、控制、触控、H.264/H.265、GPU（Xorg/Sway）
+
+## 其他平台（上游用法）
+
+同一份代码也可运行在 Termux、Linux、Windows、macOS（amd64 / arm64），或使用 Docker：
 
 ```bash
-wget https://raw.githubusercontent.com/huonwe/webscreen/refs/heads/main/docker-compose.yml
-
+wget https://raw.githubusercontent.com/youyoudezhuzhu/webscreen/refs/heads/main/docker-compose.yml
 docker compose up -d
 ```
 
-由于 UDP 流量和设备连接的原因，推荐使用 `host` 网络模式。
+默认端口 `8079`，可用 `-port 8080` 指定；支持 6 位 PIN（`-pin 555555`，默认为空）。
+客户端需要支持 WebRTC（H.264 High Profile 或 H.265 Main Profile）的浏览器。
 
-你可能需要先在 [无线调试](https://developer.android.com/studio/debug/dev-options#enable) 中配对 Android 设备。支持 `使用配对码配对设备`。配对完成后，点击 `Connect` 按钮并输入必要信息。
+## 常见问题
 
-开始流式传输后，你可能需要手动稍微改变一下屏幕场景，以获取屏幕画面。你可以简单地点击音量按钮来实现。
-
-### 其他
-
-[Redroid 快速入门](https://github.com/huonwe/webscreen/blob/main/doc/quick-start-redroid.md)
-
-## 已知问题
-
-- Xvfb 在 docker 和 termux 中无法工作
+- **自定义 Android 设备上 MediaCodec 0x80001001 崩溃**（硬编码 H.264 High Profile 所致）：把 `video_codec_options` 设为 `profile=1`
 
 ## 许可证
 
-```LICENSE
-Webscreen, streaming your device in Web browser.
-Copyright (C) 2026  Hiroi
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-```
+AGPL-3.0 —— 见 [LICENSE](LICENSE)。
