@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import java.io.File
 
 /**
@@ -37,8 +38,20 @@ class WebScreenService : Service() {
                 stopSelf()
             }
             else -> {
-                startForegroundCompat()
-                startServer()
+                // 整个前台服务流程都兜住：任何异常都不允许逃出 onStartCommand，
+                // 否则用户看到的就是"点开启服务马上闪退"。
+                try {
+                    startForegroundCompat()
+                } catch (t: Throwable) {
+                    ServerState.append("[app] 前台服务启动异常（已忽略，降级运行）: ${t.javaClass.simpleName}: ${t.message}")
+                    Log.e(TAG, "startForegroundCompat failed, degrade to background service", t)
+                }
+                try {
+                    startServer()
+                } catch (t: Throwable) {
+                    ServerState.append("[app] 启动 webscreen 异常: ${t.javaClass.simpleName}: ${t.message}")
+                    Log.e(TAG, "startServer failed", t)
+                }
             }
         }
         return START_NOT_STICKY
@@ -223,7 +236,13 @@ class WebScreenService : Service() {
     }
 
     private fun startForegroundCompat() {
-        val notification = buildNotification()
+        val notification = try {
+            buildNotification()
+        } catch (t: Throwable) {
+            Log.e(TAG, "buildNotification failed", t)
+            ServerState.append("[app] 构建通知失败: ${t.javaClass.simpleName}: ${t.message}")
+            return
+        }
 
         // Android 14+ 必须声明 foregroundServiceType；而 specialUse 在侧载应用上
         // 会因缺少 Play 审核被 AppOps 直接拒绝（真机 Android 16 + targetSdk 34 实测：
@@ -284,6 +303,7 @@ class WebScreenService : Service() {
     }
 
     companion object {
+        const val TAG = "WebScreen"
         const val ACTION_START = "com.webscreen.app.START"
         const val ACTION_STOP = "com.webscreen.app.STOP"
         private const val CHANNEL_ID = "webscreen"
@@ -291,10 +311,24 @@ class WebScreenService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, WebScreenService::class.java).setAction(ACTION_START)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            // startForegroundService 若在 5 秒内没能 startForeground，系统会直接杀掉进程。
+            // 某些 ROM（例如 Android 16 上的一加 7 Pro 实测）会拒绝 FGS 启动，
+            // 导致"点开启服务就闪退"。这里失败后立刻退回普通 startService：
+            // 服务至少能跑起来并把 webscreen 二进制拉起来（native 进程独立存活）。
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "startForegroundService 失败，退回 startService", e)
+                try {
+                    context.startService(intent)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "startService 也失败", e2)
+                    ServerState.append("[app] 启动服务失败: ${e2.javaClass.simpleName}: ${e2.message}")
+                }
             }
         }
 

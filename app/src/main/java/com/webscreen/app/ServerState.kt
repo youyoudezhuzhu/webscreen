@@ -1,6 +1,7 @@
 package com.webscreen.app
 
 import android.os.Build
+import android.util.Log
 
 /**
  * Shared, in-process state of the webscreen server, read by the activity and
@@ -44,6 +45,8 @@ object ServerState {
     }
 
     fun append(line: String) {
+        // 同时写 logcat：服务在早期被杀时界面日志来不及显示，只能靠系统日志定位。
+        Log.i("WebScreen", line)
         synchronized(logLock) {
             if (logLines.size >= MAX_LOG_LINES) {
                 logLines.removeFirst()
