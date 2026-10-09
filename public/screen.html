@@ -12,9 +12,11 @@
     <script src="/static/connect.js" defer></script>
     <script src="/static/fullscreen.js" defer></script>
     <script src="/static/screen.js" defer></script>
-    <!-- 黑屏（隐私保护）：静态加载，不依赖 WebRTC 能力协商 ——
-         挂在 updateUIBasedOnCapabilities 里时，若该回调未触发按钮就是死的 -->
+    <!-- 黑屏（隐私保护）与硬件按键（音量/电源/返回等）：静态加载，不依赖 WebRTC
+         能力协商 —— 挂在 updateUIBasedOnCapabilities 里时，若该回调未触发（或链上
+         前一个脚本加载失败），按钮就会存在但没有事件处理器，点了毫无反应。 -->
     <script src="/static/capabilities/backlight.js" defer></script>
+    <script src="/static/capabilities/buttons.js" defer></script>
     <!-- <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="/static/video_translate.js" defer></script> -->
 </head>
